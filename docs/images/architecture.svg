@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640" viewBox="0 0 1200 640">
+  <rect width="1200" height="640" fill="#f7f7fb"/>
+  <style>.t{font-family:Segoe UI,Arial;fill:#171722}.h{font-weight:700;font-size:24px}.s{font-size:16px}.b{fill:#fff;stroke:#e2e3ec;stroke-width:2}.p{fill:#5b5bd6}.w{fill:#fff;font-weight:700;font-size:16px}</style>
+  <text x="60" y="55" class="t h">SoplyraAI local-first architecture</text>
+  <rect x="60" y="105" width="220" height="110" rx="18" class="b"/><text x="90" y="145" class="t h" font-size="20">1. User actions</text><text x="90" y="180" class="t s">Clicks in any Windows app</text>
+  <rect x="350" y="105" width="240" height="110" rx="18" class="b"/><text x="380" y="145" class="t h" font-size="20">2. Capture engine</text><text x="380" y="180" class="t s">Global hook + UI Automation</text>
+  <rect x="660" y="105" width="230" height="110" rx="18" class="b"/><text x="690" y="145" class="t h" font-size="20">3. Screenshot</text><text x="690" y="180" class="t s">Window image + click focus</text>
+  <rect x="960" y="105" width="180" height="110" rx="18" class="b"/><text x="985" y="145" class="t h" font-size="20">4. Step</text><text x="985" y="180" class="t s">Structured metadata</text>
+  <path d="M280 160H350M590 160H660M890 160H960" stroke="#5b5bd6" stroke-width="4" marker-end="url(#a)"/>
+  <defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#5b5bd6"/></marker></defs>
+  <rect x="150" y="315" width="290" height="140" rx="20" class="b"/><text x="185" y="355" class="t h" font-size="20">Fast description layer</text><text x="185" y="390" class="t s">Semantic rules from button/field labels</text><text x="185" y="420" class="t s">No model required for common actions</text>
+  <rect x="500" y="315" width="290" height="140" rx="20" class="b"/><text x="535" y="355" class="t h" font-size="20">Optional local AI</text><text x="535" y="390" class="t s">OpenAI-compatible localhost endpoint</text><text x="535" y="420" class="t s">Receives metadata, not screenshots</text>
+  <rect x="850" y="315" width="290" height="140" rx="20" class="b"/><text x="885" y="355" class="t h" font-size="20">Guide editor</text><text x="885" y="390" class="t s">Edit title, text, delete steps</text><text x="885" y="420" class="t s">Local session history</text>
+  <path d="M995 215V285H295V315M995 285H645V315M995 285V315" fill="none" stroke="#5b5bd6" stroke-width="4" marker-end="url(#a)"/>
+  <rect x="320" y="525" width="560" height="70" rx="18" class="p"/><text x="405" y="568" class="w">Export: HTML · Markdown · PDF · portable screenshots</text>
+  <path d="M995 455V490H600V525" fill="none" stroke="#5b5bd6" stroke-width="4" marker-end="url(#a)"/>
+</svg>
