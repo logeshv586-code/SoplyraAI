@@ -1,7 +1,7 @@
 <Window x:Class="SoplyraAI.Views.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="SoplyraAI settings" Width="680" Height="650" ResizeMode="NoResize"
+        Title="SoplyraAI settings" Width="680" Height="710" ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner" Background="#F6F7FB">
     <Grid Margin="28">
         <Grid.RowDefinitions>
@@ -11,7 +11,10 @@
         </Grid.RowDefinitions>
 
         <Grid>
-            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
             <Border Width="52" Height="52" CornerRadius="16" Background="{StaticResource BrandGradient}" Margin="0,0,14,0">
                 <TextBlock Text="✦" Foreground="White" FontSize="23" HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
@@ -28,13 +31,23 @@
                         <CheckBox x:Name="UseAiCheck" Content="Enable AI-enhanced step descriptions" FontWeight="SemiBold" Foreground="#4F46C8"/>
                     </Border>
 
-                    <TextBlock Text="LOCAL / OPENAI-COMPATIBLE MODEL" FontSize="10" FontWeight="Bold" Foreground="#8A8A9D" Margin="0,0,0,10"/>
+                    <TextBlock Text="AI ENDPOINT" FontSize="10" FontWeight="Bold" Foreground="#8A8A9D" Margin="0,0,0,10"/>
                     <TextBlock Text="Endpoint" FontWeight="SemiBold"/>
                     <TextBox x:Name="EndpointBox" Margin="0,6,0,14"/>
                     <TextBlock Text="Model name" FontWeight="SemiBold"/>
                     <TextBox x:Name="ModelBox" Margin="0,6,0,14"/>
-                    <TextBlock Text="API key" FontWeight="SemiBold"/>
-                    <PasswordBox x:Name="ApiKeyBox" Margin="0,6,0,20" Padding="9,7" BorderBrush="#E7E8EF"/>
+                    <TextBlock Text="API key (encrypted for your Windows account)" FontWeight="SemiBold"/>
+                    <PasswordBox x:Name="ApiKeyBox" Margin="0,6,0,12" Padding="9,7" BorderBrush="#E7E8EF"/>
+
+                    <CheckBox x:Name="AllowRemoteAiCheck"
+                              Content="Allow remote HTTPS AI endpoints"
+                              FontWeight="SemiBold"
+                              Foreground="#8A4B16"
+                              Margin="0,0,0,4"/>
+                    <TextBlock Text="Off by default. When enabled, step metadata can leave this PC. Remote HTTP endpoints are always blocked."
+                               TextWrapping="Wrap"
+                               Foreground="#8A6A50"
+                               Margin="22,0,0,18"/>
 
                     <Separator Margin="0,0,0,18"/>
                     <TextBlock Text="CAPTURE BEHAVIOR" FontSize="10" FontWeight="Bold" Foreground="#8A8A9D" Margin="0,0,0,10"/>
@@ -52,7 +65,8 @@
                                 <Ellipse Width="8" Height="8" Fill="#12A36D" VerticalAlignment="Center" Margin="0,0,8,0"/>
                                 <TextBlock Text="Recommended fast local setup" FontWeight="SemiBold" Foreground="#0D7D54"/>
                             </StackPanel>
-                            <TextBlock Text="Install Ollama if required and download qwen2.5:0.5b. SoplyraAI sends UI metadata to the model—not your screenshots." TextWrapping="Wrap" Foreground="#58736A" Margin="0,7,0,12"/>
+                            <TextBlock Text="Install Ollama if required and download qwen2.5:0.5b. Password-field steps are never sent to AI, and screenshots are never sent by the current implementation."
+                                       TextWrapping="Wrap" Foreground="#58736A" Margin="0,7,0,12"/>
                             <Button x:Name="SetupButton" Content="Set up local AI" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left" Click="SetupButton_Click"/>
                             <TextBlock x:Name="SetupStatus" TextWrapping="Wrap" Foreground="#58736A" Margin="0,9,0,0"/>
                         </StackPanel>

@@ -35,7 +35,7 @@ public partial class MainWindow : Window
     private RecorderService NewRecorder()
     {
         var recorder = new RecorderService(_sessions, _settings);
-        recorder.StepCaptured += (_, step) => Dispatcher.Invoke(() =>
+        recorder.StepCaptured += (_, _) => Dispatcher.Invoke(() =>
         {
             StepsList.ItemsSource = _current.Steps;
             SetHasSteps(true);
@@ -77,7 +77,7 @@ public partial class MainWindow : Window
     private void StartCapture_Click(object sender, RoutedEventArgs e)
     {
         if (_recorder.IsRecording) return;
-        _current.Title = GuideTitle.Text.Trim();
+        _current.Title = PrivacySanitizer.Clean(GuideTitle.Text, 200);
         if (string.IsNullOrWhiteSpace(_current.Title)) _current.Title = "Untitled guide";
         _sessions.Save(_current);
         _recorder.Start(_current);
@@ -102,40 +102,84 @@ public partial class MainWindow : Window
 
     private async void ImproveAll_Click(object sender, RoutedEventArgs e)
     {
-        if (_current.Steps.Count == 0) { MessageBox.Show("Capture at least one step first.", "SoplyraAI"); return; }
+        if (_current.Steps.Count == 0)
+        {
+            MessageBox.Show("Capture at least one step first.", "SoplyraAI");
+            return;
+        }
+
         ImproveButton.IsEnabled = false;
         ImproveButton.Content = "Improving…";
-        int improved = 0;
+        var improved = 0;
+
         foreach (var step in _current.Steps)
         {
             var text = await _describer.ImproveAsync(step, _settings);
-            if (!string.IsNullOrWhiteSpace(text)) { step.Description = text; improved++; }
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                step.Description = text;
+                improved++;
+            }
         }
+
         _sessions.Save(_current);
         ImproveButton.Content = "✨ Improve with AI";
         ImproveButton.IsEnabled = true;
-        MessageBox.Show(improved > 0 ? $"Improved {improved} steps using the configured local AI." : "Local AI was not reachable. Your fast deterministic descriptions were kept.", "SoplyraAI");
+
+        MessageBox.Show(
+            improved > 0
+                ? $"Improved {improved} steps using the configured AI endpoint."
+                : "The AI endpoint was unavailable or blocked by the privacy policy. Your local deterministic descriptions were kept.",
+            "SoplyraAI");
     }
 
     private async void Export_Click(object sender, RoutedEventArgs e)
     {
-        if (_current.Steps.Count == 0) { MessageBox.Show("Capture at least one step before exporting.", "SoplyraAI"); return; }
-        _current.Title = GuideTitle.Text.Trim();
-        _sessions.Save(_current);
-        var folder = ExportService.NewExportFolder(_current);
-        _exporter.ExportHtml(_current, folder);
-        _exporter.ExportMarkdown(_current, folder);
-        await _exporter.ExportPdfAsync(_current, folder);
-        Process.Start(new ProcessStartInfo("explorer.exe", folder) { UseShellExecute = true });
+        if (_current.Steps.Count == 0)
+        {
+            MessageBox.Show("Capture at least one step before exporting.", "SoplyraAI");
+            return;
+        }
+
+        try
+        {
+            _current.Title = PrivacySanitizer.Clean(GuideTitle.Text, 200);
+            if (string.IsNullOrWhiteSpace(_current.Title)) _current.Title = "Untitled guide";
+            _sessions.Save(_current);
+
+            var folder = ExportService.NewExportFolder(_current);
+            _exporter.ExportHtml(_current, folder);
+            _exporter.ExportMarkdown(_current, folder);
+            await _exporter.ExportPdfAsync(_current, folder);
+
+            var explorer = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                "explorer.exe");
+
+            if (File.Exists(explorer))
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = explorer,
+                    UseShellExecute = false
+                };
+                psi.ArgumentList.Add(folder);
+                Process.Start(psi);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"Export could not be completed: {PrivacySanitizer.Clean(ex.Message, 300)}",
+                "SoplyraAI");
+        }
     }
 
     private void Settings_Click(object sender, RoutedEventArgs e)
     {
         var window = new SettingsWindow(_settings, _aiSetup) { Owner = this };
         if (window.ShowDialog() == true)
-        {
             _settingsStore.Save(_settings);
-        }
     }
 
     private void DeleteStep_Click(object sender, RoutedEventArgs e)
@@ -151,13 +195,15 @@ public partial class MainWindow : Window
 
     private void Renumber()
     {
-        for (var i = 0; i < _current.Steps.Count; i++) _current.Steps[i].Number = i + 1;
+        for (var i = 0; i < _current.Steps.Count; i++)
+            _current.Steps[i].Number = i + 1;
         StepsList.Items.Refresh();
     }
 
     private void GuideTitle_LostFocus(object sender, RoutedEventArgs e)
     {
-        _current.Title = string.IsNullOrWhiteSpace(GuideTitle.Text) ? "Untitled guide" : GuideTitle.Text.Trim();
+        _current.Title = PrivacySanitizer.Clean(GuideTitle.Text, 200);
+        if (string.IsNullOrWhiteSpace(_current.Title)) _current.Title = "Untitled guide";
         _sessions.Save(_current);
         RefreshSessions(selectCurrent: true);
     }

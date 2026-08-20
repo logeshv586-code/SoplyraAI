@@ -1,59 +1,151 @@
 using System.Diagnostics;
+using System.Security.Principal;
 
 namespace SoplyraAI.Services;
 
 public sealed class LocalAiSetupService
 {
+    private static readonly TimeSpan InstallTimeout = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan PullTimeout = TimeSpan.FromMinutes(30);
+
     public async Task<string> SetupAsync(Action<string>? log = null)
     {
+        if (IsElevated())
+            return "For safety, automatic AI setup is disabled while SoplyraAI is running as Administrator. Restart it normally and retry.";
+
         var ollama = FindOllama();
         if (ollama is null)
         {
-            log?.Invoke("Ollama is not installed. Installing with winget…");
-            var installCode = await RunAsync("winget", new[] { "install", "--id", "Ollama.Ollama", "-e", "--accept-package-agreements", "--accept-source-agreements" }, log);
-            if (installCode != 0) return "Ollama installation did not complete. Install Ollama manually, then retry.";
+            var winget = FindWinget();
+            if (winget is null)
+                return "Windows Package Manager was not found. Install Ollama manually, then retry.";
+
+            log?.Invoke("Ollama is not installed. Installing with Windows Package Manager…");
+            var installCode = await RunAsync(
+                winget,
+                new[]
+                {
+                    "install", "--id", "Ollama.Ollama", "-e",
+                    "--accept-package-agreements", "--accept-source-agreements"
+                },
+                InstallTimeout,
+                log);
+
+            if (installCode != 0)
+                return "Ollama installation did not complete. Install Ollama manually, then retry.";
+
             ollama = FindOllama();
-            if (ollama is null) return "Ollama installed, but this process cannot locate it yet. Restart SoplyraAI and run setup again.";
+            if (ollama is null)
+                return "Ollama installed, but SoplyraAI cannot locate its trusted executable yet. Restart SoplyraAI and retry.";
         }
 
         log?.Invoke("Downloading the small local instruction model…");
-        var pullCode = await RunAsync(ollama, new[] { "pull", "qwen2.5:0.5b" }, log);
-        return pullCode == 0 ? "Local AI is ready: qwen2.5:0.5b" : "Ollama is installed, but the model download failed.";
+        var pullCode = await RunAsync(
+            ollama,
+            new[] { "pull", "qwen2.5:0.5b" },
+            PullTimeout,
+            log);
+
+        return pullCode == 0
+            ? "Local AI is ready: qwen2.5:0.5b"
+            : "Ollama is installed, but the model download failed.";
     }
 
     private static string? FindOllama()
     {
-        try
-        {
-            using var p = Process.Start(new ProcessStartInfo("where.exe", "ollama") { RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true });
-            var first = p?.StandardOutput.ReadLine();
-            p?.WaitForExit(2000);
-            if (!string.IsNullOrWhiteSpace(first) && File.Exists(first)) return first;
-        }
-        catch { }
-
         string[] candidates =
         {
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Ollama", "ollama.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Ollama", "ollama.exe")
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Programs", "Ollama", "ollama.exe"),
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                "Ollama", "ollama.exe")
         };
-        return candidates.FirstOrDefault(File.Exists);
+
+        return candidates
+            .Select(Path.GetFullPath)
+            .FirstOrDefault(File.Exists);
     }
 
-    private static async Task<int> RunAsync(string file, IEnumerable<string> args, Action<string>? log)
+    private static string? FindWinget()
+    {
+        var path = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Microsoft", "WindowsApps", "winget.exe");
+        return File.Exists(path) ? Path.GetFullPath(path) : null;
+    }
+
+    private static async Task<int> RunAsync(
+        string file,
+        IEnumerable<string> args,
+        TimeSpan timeout,
+        Action<string>? log)
     {
         try
         {
-            var psi = new ProcessStartInfo(file) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+            if (!Path.IsPathFullyQualified(file) || !File.Exists(file))
+            {
+                log?.Invoke("Refusing to execute an untrusted helper path.");
+                return -1;
+            }
+
+            var psi = new ProcessStartInfo(file)
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = Path.GetDirectoryName(file)!
+            };
+
             foreach (var arg in args) psi.ArgumentList.Add(arg);
-            using var p = Process.Start(psi);
-            if (p is null) return -1;
-            p.OutputDataReceived += (_, e) => { if (e.Data is not null) log?.Invoke(e.Data); };
-            p.ErrorDataReceived += (_, e) => { if (e.Data is not null) log?.Invoke(e.Data); };
-            p.BeginOutputReadLine(); p.BeginErrorReadLine();
-            await p.WaitForExitAsync();
-            return p.ExitCode;
+
+            using var process = Process.Start(psi);
+            if (process is null) return -1;
+
+            process.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data is not null) log?.Invoke(PrivacySanitizer.Clean(e.Data, 500));
+            };
+            process.ErrorDataReceived += (_, e) =>
+            {
+                if (e.Data is not null) log?.Invoke(PrivacySanitizer.Clean(e.Data, 500));
+            };
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            using var cts = new CancellationTokenSource(timeout);
+            try
+            {
+                await process.WaitForExitAsync(cts.Token);
+                return process.ExitCode;
+            }
+            catch (OperationCanceledException)
+            {
+                try { process.Kill(entireProcessTree: true); } catch { }
+                log?.Invoke("The helper process exceeded its allowed time and was stopped.");
+                return -1;
+            }
         }
-        catch (Exception ex) { log?.Invoke(ex.Message); return -1; }
+        catch (Exception ex)
+        {
+            log?.Invoke(PrivacySanitizer.Clean(ex.Message, 500));
+            return -1;
+        }
+    }
+
+    private static bool IsElevated()
+    {
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            return new WindowsPrincipal(identity)
+                .IsInRole(WindowsBuiltInRole.Administrator);
+        }
+        catch
+        {
+            return false;
+        }
     }
 }
