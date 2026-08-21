@@ -259,7 +259,7 @@ public partial class MainWindow : Window
             {
                 var pdf = await _pdfExporter.ExportAsync(session, folder);
                 if (pdf is null)
-                    throw new InvalidOperationException("PDF could not be completed by Microsoft Edge, Chrome, or Brave. Word and HTML export remain available.");
+                    throw new InvalidOperationException("PDF generation did not produce a file. Word and HTML export remain available.");
                 outputs.Add(pdf);
             }
             else if (formatOption.Contains("Word") || formatOption.Contains("docx"))
@@ -284,7 +284,7 @@ public partial class MainWindow : Window
                 if (pdf is not null)
                     outputs.Add(pdf);
                 else
-                    warnings.Add("PDF could not be completed by an installed Chromium browser; Word, HTML and Markdown were generated successfully.");
+                    warnings.Add("PDF could not be generated; Word, HTML and Markdown were generated successfully.");
             }
 
             if (outputs.Count == 0)
@@ -331,12 +331,37 @@ public partial class MainWindow : Window
 
     private void DeleteStep_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: GuideStep step })
+        e.Handled = true;
+        var element = sender as FrameworkElement;
+        var step = element?.DataContext as GuideStep ?? (sender as Button)?.Tag as GuideStep;
+        if (step is null) return;
+
+        try
         {
-            _current.Steps.Remove(step);
-            Renumber();
-            _sessions.Save(_current);
+            if (!_sessions.DeleteStep(_current, step.Id))
+            {
+                MessageBox.Show(
+                    "This captured step could not be found in the active guide. Reload the guide and try again.",
+                    "SoplyraAI",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            StepsList.ItemsSource = null;
+            StepsList.ItemsSource = _current.Steps;
+            StepsList.Items.Refresh();
             SetHasSteps(_current.Steps.Count > 0);
+            _captureBar?.SetStepCount(_current.Steps.Count);
+            RefreshSessions(selectCurrent: true);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"The captured step could not be removed safely: {PrivacySanitizer.Clean(ex.Message, 300)}",
+                "SoplyraAI",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
         }
     }
 
