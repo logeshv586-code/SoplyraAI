@@ -20,25 +20,24 @@ public sealed class GuideStep : INotifyPropertyChanged
     {
         get
         {
-            var element = Context?.ElementName ?? "";
-            if (IsGenericBrowserSurface(_title) || IsGenericBrowserSurface(element))
+            if (IsLegacyBrowserSurfaceTitle(_title))
                 return $"{(string.IsNullOrWhiteSpace(Action) ? "Click" : Action)} highlighted area";
-            return _title;
+            return StepNarrativeService.NormalizeStoredTitle(Action, Context, _title);
         }
-        set { _title = value; OnPropertyChanged(); }
+        set { _title = value ?? ""; OnPropertyChanged(); }
     }
 
     public string Description
     {
         get => StepNarrativeService.NormalizeStoredDescription(Action, Context, _title, _description);
-        set { _description = value; OnPropertyChanged(); }
+        set { _description = value ?? ""; OnPropertyChanged(); }
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
     private void OnPropertyChanged([CallerMemberName] string? name = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 
-    private static bool IsGenericBrowserSurface(string? value)
+    private static bool IsLegacyBrowserSurfaceTitle(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return false;
         return value.Contains("Chrome Legacy Window", StringComparison.OrdinalIgnoreCase) ||
