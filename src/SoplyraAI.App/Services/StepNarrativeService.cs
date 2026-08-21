@@ -225,7 +225,7 @@ internal static class StepNarrativeService
         var e = element.Trim().ToLowerInvariant();
         var c = HumanizeControl(control).Trim().ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(e)) return true;
-        if (e == c || e == "selected control" || e == "item" || e == "pane" || e == "window" || e == "document") return true;
+        if (e == c || e == "selected control" || e == "item" || e == "pane" || e == "window" || e == "document" || e == "highlighted area") return true;
         return e.Contains("chrome legacy window") ||
                e.Contains("chrome_renderwidgethosthwnd") ||
                e.Contains("legacy window") ||
