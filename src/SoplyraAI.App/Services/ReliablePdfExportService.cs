@@ -152,7 +152,6 @@ public sealed class ReliablePdfExportService
         g.FillRectangle(white, card);
         g.DrawRectangle(border, card.X, card.Y, card.Width, card.Height);
 
-        // Keep the user's saved workflow name visible on every page without a separate cover page.
         var guideName = FitText(g, document.Title, guideFont, 760, 30);
         g.DrawString(guideName, guideFont, ink, new RectangleF(105, 77, 760, 30));
         g.DrawString(
@@ -167,12 +166,28 @@ public sealed class ReliablePdfExportService
         g.DrawString(step.Number.ToString(), bodyFont, Brushes.White, new RectangleF(105, 145, 54, 28), CenterFormat());
         g.DrawString($"STEP {step.Number:00}", labelFont, primary, 180, 132);
 
-        // Long titles are measured and the font is reduced only when required. The screenshot
-        // always begins below the returned title bottom, so title text can never overlap it.
         var titleBottom = DrawAdaptiveTitle(g, step.Title, ink, 180, 156, 930, 132);
         var screenTop = Math.Max(245f, titleBottom + 18f);
 
-        var screenRect = new RectangleF(105, screenTop, 1020, 560);
+        // Size every block from the real content. This avoids clipping long generated descriptions
+        // and preserves enough room for long application/window context at the bottom of the page.
+        var instructionHeight = MeasureSectionHeight(g, step.Instruction, bodyFont, 1020, 96, 150);
+        var purposeHeight = MeasureSectionHeight(g, step.Purpose, bodyFont, 1020, 110, 250);
+        var expectedHeight = MeasureSectionHeight(g, step.ExpectedResult, bodyFont, 1020, 96, 180);
+        var contextText = BuildContextText(step);
+        var contextHeight = MeasureContextHeight(g, contextText, metaFont, 980);
+
+        const float contentBottom = 1620f;
+        const float captionAndSpacing = 46f;
+        var belowScreenHeight =
+            18f + captionAndSpacing +
+            instructionHeight + 12f +
+            purposeHeight + 12f +
+            expectedHeight + 14f +
+            contextHeight;
+
+        var screenHeight = Math.Clamp(contentBottom - screenTop - belowScreenHeight, 300f, 560f);
+        var screenRect = new RectangleF(105, screenTop, 1020, screenHeight);
         g.FillRectangle(soft, screenRect);
         g.DrawRectangle(border, screenRect.X, screenRect.Y, screenRect.Width, screenRect.Height);
 
@@ -201,17 +216,21 @@ public sealed class ReliablePdfExportService
             captionFont,
             muted,
             new RectangleF(105, y, 1020, 32));
-        y += 46;
+        y += captionAndSpacing;
 
-        y = DrawTextSection(g, "HOW TO PERFORM", step.Instruction, 105, y, 1020, 120, labelFont, bodyFont, primary, ink, border) + 12;
-        y = DrawTextSection(g, "WHAT THIS DOES", step.Purpose, 105, y, 1020, 170, labelFont, bodyFont, primary, ink, border) + 12;
-        y = DrawTextSection(g, "EXPECTED RESULT", step.ExpectedResult, 105, y, 1020, 125, labelFont, bodyFont, primary, ink, border) + 14;
+        y = DrawTextSection(g, "HOW TO PERFORM", step.Instruction, 105, y, 1020, instructionHeight, labelFont, bodyFont, primary, ink, border) + 12;
+        y = DrawTextSection(g, "WHAT THIS DOES", step.Purpose, 105, y, 1020, purposeHeight, labelFont, bodyFont, primary, ink, border) + 12;
+        y = DrawTextSection(g, "EXPECTED RESULT", step.ExpectedResult, 105, y, 1020, expectedHeight, labelFont, bodyFont, primary, ink, border) + 14;
 
-        var context = $"Action: {step.Action}   ·   Control: {step.Control}   ·   Application: {step.Application}" +
-                      (string.IsNullOrWhiteSpace(step.Window) ? "" : $"   ·   Window: {step.Window}");
-        g.FillRectangle(soft, 105, y, 1020, 62);
-        g.DrawRectangle(border, 105, y, 1020, 62);
-        g.DrawString(FitText(g, context, metaFont, 980, 42), metaFont, muted, new RectangleF(125, y + 16, 980, 36));
+        g.FillRectangle(soft, 105, y, 1020, contextHeight);
+        g.DrawRectangle(border, 105, y, 1020, contextHeight);
+        var fittedContext = FitText(g, contextText, metaFont, 980, contextHeight - 26);
+        g.DrawString(
+            fittedContext,
+            metaFont,
+            muted,
+            new RectangleF(125, y + 13, 980, contextHeight - 22),
+            new StringFormat { Trimming = StringTrimming.EllipsisWord });
 
         DrawFooter(g, pageNumber, document.Steps.Count, captionFont, muted);
         return EncodePage(bitmap);
@@ -410,6 +429,36 @@ public sealed class ReliablePdfExportService
         var fitted = FitText(g, text, bodyFont, width - 36, height - 45);
         g.DrawString(fitted, bodyFont, bodyBrush, new RectangleF(x + 18, y + 39, width - 36, height - 45));
         return y + height;
+    }
+
+    private static float MeasureSectionHeight(
+        Graphics g,
+        string? text,
+        Font bodyFont,
+        float width,
+        float minHeight,
+        float maxHeight)
+    {
+        var clean = PrivacySanitizer.Clean(text, 4000);
+        if (string.IsNullOrWhiteSpace(clean)) clean = "Not available.";
+        var availableWidth = Math.Max(1f, width - 36f);
+        var measured = g.MeasureString(clean, bodyFont, new SizeF(availableWidth, maxHeight - 45f)).Height;
+        return Math.Clamp(measured + 54f, minHeight, maxHeight);
+    }
+
+    private static float MeasureContextHeight(Graphics g, string text, Font font, float width)
+    {
+        var clean = PrivacySanitizer.Clean(text, 1200);
+        var measured = g.MeasureString(clean, font, new SizeF(width, 120f)).Height;
+        return Math.Clamp(measured + 30f, 62f, 140f);
+    }
+
+    private static string BuildContextText(PdfStepData step)
+    {
+        var firstLine = $"Action: {step.Action}   ·   Control: {step.Control}   ·   Application: {step.Application}";
+        return string.IsNullOrWhiteSpace(step.Window)
+            ? firstLine
+            : firstLine + Environment.NewLine + "Window: " + step.Window;
     }
 
     private static string FitText(Graphics g, string? value, Font font, float width, float maxHeight)
