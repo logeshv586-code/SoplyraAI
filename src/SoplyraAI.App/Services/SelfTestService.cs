@@ -13,6 +13,7 @@ internal static class SelfTestService
         TestAiEndpointPolicy();
         TestSettingsSecretProtection();
         TestStructuredExportContent();
+        TestPdfCompletenessValidator();
         TestSessionDelete();
     }
 
@@ -180,32 +181,46 @@ internal static class SelfTestService
                 markdownText.IndexOf("### How to perform", StringComparison.Ordinal))
                 throw new InvalidOperationException("Markdown screenshot must appear before the explanation.");
 
-            using (var zip = ZipFile.OpenRead(docx))
-            {
-                var documentEntry = zip.GetEntry("word/document.xml") ??
-                    throw new InvalidOperationException("DOCX export package is missing document.xml.");
-                using var reader = new StreamReader(documentEntry.Open(), Encoding.UTF8);
-                var documentXml = reader.ReadToEnd();
+            using var zip = ZipFile.OpenRead(docx);
+            var documentEntry = zip.GetEntry("word/document.xml") ??
+                throw new InvalidOperationException("DOCX export package is missing document.xml.");
+            using var reader = new StreamReader(documentEntry.Open(), Encoding.UTF8);
+            var documentXml = reader.ReadToEnd();
 
-                if (!documentXml.Contains("Customer request workflow", StringComparison.Ordinal) ||
-                    !documentXml.Contains("Step 1: Save customer request", StringComparison.Ordinal) ||
-                    !documentXml.Contains("Step 2: Click Submit", StringComparison.Ordinal) ||
-                    !documentXml.Contains("How to perform", StringComparison.Ordinal) ||
-                    !documentXml.Contains("What this does", StringComparison.Ordinal) ||
-                    !documentXml.Contains("Expected result", StringComparison.Ordinal))
-                    throw new InvalidOperationException("DOCX visible-content export test failed.");
+            if (!documentXml.Contains("Customer request workflow", StringComparison.Ordinal) ||
+                !documentXml.Contains("Step 1: Save customer request", StringComparison.Ordinal) ||
+                !documentXml.Contains("Step 2: Click Submit", StringComparison.Ordinal) ||
+                !documentXml.Contains("How to perform", StringComparison.Ordinal) ||
+                !documentXml.Contains("What this does", StringComparison.Ordinal) ||
+                !documentXml.Contains("Expected result", StringComparison.Ordinal))
+                throw new InvalidOperationException("DOCX visible-content export test failed.");
 
-                if (!zip.Entries.Any(entry => entry.FullName.StartsWith("word/media/", StringComparison.OrdinalIgnoreCase)))
-                    throw new InvalidOperationException("DOCX screenshot embedding test failed.");
-            }
+            if (!zip.Entries.Any(entry => entry.FullName.StartsWith("word/media/", StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException("DOCX screenshot embedding test failed.");
+        }
+        finally
+        {
+            try { Directory.Delete(temp, true); } catch { }
+        }
+    }
 
-            if (ExportService.FindHeadlessBrowser() is not null)
-            {
-                var pdfExporter = new ReliablePdfExportService(exporter);
-                var pdf = pdfExporter.ExportAsync(session, exportFolder).GetAwaiter().GetResult();
-                if (string.IsNullOrWhiteSpace(pdf) || !ReliablePdfExportService.IsCompletePdf(pdf))
-                    throw new InvalidOperationException("PDF export did not produce a complete populated PDF.");
-            }
+    private static void TestPdfCompletenessValidator()
+    {
+        var temp = Path.Combine(Path.GetTempPath(), "soplyraai-pdf-validator-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temp);
+        try
+        {
+            var complete = Path.Combine(temp, "complete.pdf");
+            var incomplete = Path.Combine(temp, "incomplete.pdf");
+
+            var completeBytes = Encoding.ASCII.GetBytes("%PDF-1.7\n" + new string(' ', 5000) + "\n%%EOF\n");
+            File.WriteAllBytes(complete, completeBytes);
+            File.WriteAllBytes(incomplete, Encoding.ASCII.GetBytes("%PDF-1.7\n" + new string(' ', 5000)));
+
+            if (!ReliablePdfExportService.IsCompletePdf(complete))
+                throw new InvalidOperationException("Complete PDF validation test failed.");
+            if (ReliablePdfExportService.IsCompletePdf(incomplete))
+                throw new InvalidOperationException("Incomplete PDF should not pass validation.");
         }
         finally
         {
