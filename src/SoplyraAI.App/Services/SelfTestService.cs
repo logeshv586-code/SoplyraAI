@@ -14,7 +14,7 @@ internal static class SelfTestService
         TestSettingsSecretProtection();
         TestStructuredExportContent();
         TestPdfCompletenessValidator();
-        TestSessionDelete();
+        TestSessionRenameAndDelete();
     }
 
     private static void TestDescriptionModes()
@@ -121,7 +121,7 @@ internal static class SelfTestService
             {
                 Number = 1,
                 Action = "Click",
-                Title = "Save customer request",
+                Title = "Click Egonex-AI/Understand-Anything: Graphs that teach > graphs that impress. Turn any code into an interactive knowledge graph you can explore, search, and ask questions",
                 Description = "Click Save to store the customer request before continuing.",
                 ScreenshotPath = imagePath,
                 Context = new UiContext
@@ -191,7 +191,7 @@ internal static class SelfTestService
                 var documentXml = reader.ReadToEnd();
 
                 if (!documentXml.Contains("Customer request workflow", StringComparison.Ordinal) ||
-                    !documentXml.Contains("Step 1: Save customer request", StringComparison.Ordinal) ||
+                    !documentXml.Contains("Step 1: Click Egonex-AI/Understand-Anything", StringComparison.Ordinal) ||
                     !documentXml.Contains("Step 2: Click Submit", StringComparison.Ordinal) ||
                     !documentXml.Contains("How to perform", StringComparison.Ordinal) ||
                     !documentXml.Contains("What this does", StringComparison.Ordinal) ||
@@ -207,9 +207,10 @@ internal static class SelfTestService
 
             var pdfBytes = File.ReadAllBytes(pdf);
             var pdfAscii = Encoding.ASCII.GetString(pdfBytes);
-            if (!pdfAscii.Contains("/Count 3", StringComparison.Ordinal) ||
-                pdfAscii.CountOccurrences("/Subtype /Image") < 3)
-                throw new InvalidOperationException("Native PDF does not contain the expected overview and step pages.");
+            if (!pdfAscii.Contains("/Count 2", StringComparison.Ordinal) ||
+                pdfAscii.Contains("/Count 3", StringComparison.Ordinal) ||
+                pdfAscii.CountOccurrences("/Subtype /Image") < 2)
+                throw new InvalidOperationException("Native PDF must contain exactly one page per recorded step and no separate overview page.");
         }
         finally
         {
@@ -241,15 +242,22 @@ internal static class SelfTestService
         }
     }
 
-    private static void TestSessionDelete()
+    private static void TestSessionRenameAndDelete()
     {
         var temp = Path.Combine(Path.GetTempPath(), "soplyraai-session-selftest-" + Guid.NewGuid().ToString("N"));
         try
         {
             var store = new SessionStore(temp);
-            var session = store.Create("Delete me");
+            var session = store.Create("Untitled guide");
             if (!Directory.Exists(session.SessionFolder))
                 throw new InvalidOperationException("Session creation test failed.");
+
+            session.Title = "Customer Onboarding SOP";
+            store.Save(session);
+            var reloaded = store.LoadAll().FirstOrDefault(item => item.Id == session.Id);
+            if (reloaded?.Title != "Customer Onboarding SOP")
+                throw new InvalidOperationException("Saved workflow rename persistence test failed.");
+
             if (!store.Delete(session.Id) || Directory.Exists(session.SessionFolder))
                 throw new InvalidOperationException("Recent-guide deletion test failed.");
         }

@@ -54,13 +54,14 @@
                         <ListBox.ItemTemplate>
                             <DataTemplate DataType="{x:Type models:GuideSession}">
                                 <Grid>
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                     <StackPanel VerticalAlignment="Center">
                                         <TextBlock Text="{Binding Title}" Foreground="#0F172A" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis"/>
                                         <TextBlock Text="{Binding CreatedAt, StringFormat={}{0:dd MMM · HH:mm}}" Foreground="#64748B" FontSize="11" Margin="0,3,0,0"/>
                                     </StackPanel>
-                                    <Button Grid.Column="1" Content="↗" Tag="{Binding}" ToolTip="Export this guide" Style="{StaticResource GhostButton}" Padding="7,4" FontSize="11" Margin="6,0,4,0" VerticalAlignment="Center" Click="ExportSidebarGuide_Click"/>
-                                    <Button Grid.Column="2" Content="×" Tag="{Binding}" ToolTip="Delete guide" Style="{StaticResource DangerButton}" Margin="0" VerticalAlignment="Center" Click="DeleteGuide_Click"/>
+                                    <Button Grid.Column="1" Content="✎" Tag="{Binding}" ToolTip="Rename this saved workflow" Style="{StaticResource GhostButton}" Padding="7,4" FontSize="11" Margin="6,0,4,0" VerticalAlignment="Center" Click="RenameGuide_Click"/>
+                                    <Button Grid.Column="2" Content="↗" Tag="{Binding}" ToolTip="Export this guide" Style="{StaticResource GhostButton}" Padding="7,4" FontSize="11" Margin="0,0,4,0" VerticalAlignment="Center" Click="ExportSidebarGuide_Click"/>
+                                    <Button Grid.Column="3" Content="×" Tag="{Binding}" ToolTip="Delete guide" Style="{StaticResource DangerButton}" Margin="0" VerticalAlignment="Center" Click="DeleteGuide_Click"/>
                                 </Grid>
                             </DataTemplate>
                         </ListBox.ItemTemplate>

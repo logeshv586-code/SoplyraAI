@@ -35,15 +35,12 @@ public sealed class ReliablePdfExportService
         try
         {
             var document = BuildDocument(session);
-            var pages = new List<RasterPage>
-            {
-                RenderOverviewPage(document, cancellationToken)
-            };
+            var pages = new List<RasterPage>(document.Steps.Count);
 
-            foreach (var step in document.Steps)
+            for (var i = 0; i < document.Steps.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                pages.Add(RenderStepPage(document, step, cancellationToken));
+                pages.Add(RenderStepPage(document, document.Steps[i], i + 1, cancellationToken));
             }
 
             WriteRasterPdf(pdf, pages, cancellationToken);
@@ -71,36 +68,10 @@ public sealed class ReliablePdfExportService
         var title = PrivacySanitizer.Clean(session.Title, 200);
         if (string.IsNullOrWhiteSpace(title)) title = "Standard Operating Procedure";
 
-        var applications = session.Steps
-            .Select(step => PrivacySanitizer.Clean(step.Context?.ProcessName, 120))
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(5)
-            .ToList();
-        var apps = applications.Count == 0 ? "Windows desktop application" : string.Join(", ", applications);
-
         var steps = session.Steps.Select(step => BuildStep(step, session)).ToList();
-        var purpose =
-            $"This document provides a repeatable, screen-by-screen procedure for the captured workflow in {apps}. " +
-            "Each recorded screen is paired with an instruction, an explanation of what the action does, and the expected result.";
-        var scope =
-            $"The guide covers {steps.Count} recorded interaction{(steps.Count == 1 ? "" : "s")} from this SoplyraAI session. " +
-            "Passwords and protected credentials are not included.";
-        var prerequisites =
-            $"Open {apps}, sign in with the permissions required for the process, and navigate to the starting screen shown in Step 1.";
-        var completion =
-            $"The procedure is complete when all {steps.Count} recorded step{(steps.Count == 1 ? "" : "s")} have been performed in order " +
-            "and the final expected result is visible.";
-
         return new PdfDocumentData(
             title,
-            apps,
             session.DocumentationMode == "Detailed" ? "Detailed SOP" : "Quick Visual Guide",
-            session.CreatedAt,
-            purpose,
-            scope,
-            prerequisites,
-            completion,
             steps);
     }
 
@@ -152,79 +123,10 @@ public sealed class ReliablePdfExportService
             imageBytes);
     }
 
-    private static RasterPage RenderOverviewPage(PdfDocumentData document, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        using var bitmap = NewPageBitmap();
-        using var g = PrepareGraphics(bitmap);
-        g.Clear(Color.FromArgb(248, 250, 252));
-
-        using var ink = new SolidBrush(Color.FromArgb(15, 23, 42));
-        using var muted = new SolidBrush(Color.FromArgb(100, 116, 139));
-        using var primary = new SolidBrush(Color.FromArgb(79, 70, 229));
-        using var softPrimary = new SolidBrush(Color.FromArgb(238, 242, 255));
-        using var white = new SolidBrush(Color.White);
-        using var border = new Pen(Color.FromArgb(226, 232, 240), 2);
-        using var titleFont = new Font("Segoe UI", 30, FontStyle.Bold, GraphicsUnit.Point);
-        using var subtitleFont = new Font("Segoe UI", 12, FontStyle.Regular, GraphicsUnit.Point);
-        using var metaFont = new Font("Segoe UI", 10.5f, FontStyle.Regular, GraphicsUnit.Point);
-        using var headingFont = new Font("Segoe UI", 15, FontStyle.Bold, GraphicsUnit.Point);
-        using var sectionLabelFont = new Font("Segoe UI", 9.5f, FontStyle.Bold, GraphicsUnit.Point);
-        using var bodyFont = new Font("Segoe UI", 11.5f, FontStyle.Regular, GraphicsUnit.Point);
-        using var smallFont = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
-
-        var card = new RectangleF(65, 60, 1110, 1570);
-        g.FillRectangle(white, card);
-        g.DrawRectangle(border, card.X, card.Y, card.Width, card.Height);
-
-        g.FillRectangle(softPrimary, 105, 105, 315, 44);
-        g.DrawString("STANDARD OPERATING PROCEDURE", sectionLabelFont, primary, 122, 116);
-
-        var y = 180f;
-        y = DrawFitText(g, document.Title, titleFont, ink, 105, y, 1020, 145) + 18;
-        g.DrawString("Generated from a captured Windows workflow by SoplyraAI", subtitleFont, muted, 105, y);
-        y += 60;
-
-        DrawMetaCard(g, "APPLICATIONS", document.Applications, 105, y, 490, 105, sectionLabelFont, metaFont, muted, ink, border);
-        DrawMetaCard(g, "DOCUMENTATION TYPE", document.DocumentationType, 620, y, 490, 105, sectionLabelFont, metaFont, muted, ink, border);
-        y += 125;
-        DrawMetaCard(g, "TOTAL STEPS", document.Steps.Count.ToString(), 105, y, 490, 105, sectionLabelFont, metaFont, muted, ink, border);
-        DrawMetaCard(g, "RECORDED", document.CreatedAt.ToString("dd MMM yyyy · HH:mm"), 620, y, 490, 105, sectionLabelFont, metaFont, muted, ink, border);
-        y += 155;
-
-        g.DrawString("Document overview", headingFont, ink, 105, y);
-        y += 48;
-        y = DrawOverviewBlock(g, "PURPOSE", document.Purpose, 105, y, 1020, 140, sectionLabelFont, bodyFont, primary, ink, border) + 16;
-        y = DrawOverviewBlock(g, "SCOPE", document.Scope, 105, y, 1020, 120, sectionLabelFont, bodyFont, primary, ink, border) + 16;
-        y = DrawOverviewBlock(g, "PREREQUISITES", document.Prerequisites, 105, y, 1020, 120, sectionLabelFont, bodyFont, primary, ink, border) + 16;
-        y = DrawOverviewBlock(g, "COMPLETION CRITERIA", document.CompletionCriteria, 105, y, 1020, 120, sectionLabelFont, bodyFont, primary, ink, border) + 20;
-
-        if (document.Steps.Count > 0 && y < 1420)
-        {
-            g.DrawString("Workflow step index", headingFont, ink, 105, y);
-            y += 43;
-            var take = Math.Min(document.Steps.Count, 8);
-            for (var i = 0; i < take && y < 1530; i++)
-            {
-                var step = document.Steps[i];
-                using var badge = new SolidBrush(Color.FromArgb(79, 70, 229));
-                g.FillEllipse(badge, 108, y + 2, 30, 30);
-                g.DrawString(step.Number.ToString(), smallFont, Brushes.White, new RectangleF(108, y + 5, 30, 22), CenterFormat());
-                var line = FitText(g, step.Title, bodyFont, 930, 38);
-                g.DrawString(line, bodyFont, ink, new RectangleF(155, y, 930, 40));
-                y += 42;
-            }
-            if (document.Steps.Count > take && y < 1565)
-                g.DrawString($"+ {document.Steps.Count - take} more recorded steps", smallFont, muted, 155, y);
-        }
-
-        DrawFooter(g, 1, document.Steps.Count + 1, smallFont, muted);
-        return EncodePage(bitmap);
-    }
-
     private static RasterPage RenderStepPage(
         PdfDocumentData document,
         PdfStepData step,
+        int pageNumber,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -238,7 +140,9 @@ public sealed class ReliablePdfExportService
         using var soft = new SolidBrush(Color.FromArgb(248, 250, 252));
         using var white = new SolidBrush(Color.White);
         using var border = new Pen(Color.FromArgb(226, 232, 240), 2);
-        using var titleFont = new Font("Segoe UI", 20, FontStyle.Bold, GraphicsUnit.Point);
+        using var separator = new Pen(Color.FromArgb(226, 232, 240), 2);
+        using var guideFont = new Font("Segoe UI", 10.5f, FontStyle.Bold, GraphicsUnit.Point);
+        using var guideMetaFont = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
         using var labelFont = new Font("Segoe UI", 9.5f, FontStyle.Bold, GraphicsUnit.Point);
         using var bodyFont = new Font("Segoe UI", 11.25f, FontStyle.Regular, GraphicsUnit.Point);
         using var captionFont = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
@@ -248,12 +152,27 @@ public sealed class ReliablePdfExportService
         g.FillRectangle(white, card);
         g.DrawRectangle(border, card.X, card.Y, card.Width, card.Height);
 
-        g.FillEllipse(primary, 105, 100, 58, 58);
-        g.DrawString(step.Number.ToString(), bodyFont, Brushes.White, new RectangleF(105, 115, 58, 30), CenterFormat());
-        g.DrawString($"STEP {step.Number:00}", labelFont, primary, 185, 101);
-        var y = DrawFitText(g, step.Title, titleFont, ink, 185, 125, 925, 92) + 20;
+        // Keep the user's saved workflow name visible on every page without a separate cover page.
+        var guideName = FitText(g, document.Title, guideFont, 760, 30);
+        g.DrawString(guideName, guideFont, ink, new RectangleF(105, 77, 760, 30));
+        g.DrawString(
+            document.DocumentationType,
+            guideMetaFont,
+            muted,
+            new RectangleF(875, 79, 250, 28),
+            new StringFormat { Alignment = StringAlignment.Far });
+        g.DrawLine(separator, 105, 112, 1125, 112);
 
-        var screenRect = new RectangleF(105, y, 1020, 610);
+        g.FillEllipse(primary, 105, 132, 54, 54);
+        g.DrawString(step.Number.ToString(), bodyFont, Brushes.White, new RectangleF(105, 145, 54, 28), CenterFormat());
+        g.DrawString($"STEP {step.Number:00}", labelFont, primary, 180, 132);
+
+        // Long titles are measured and the font is reduced only when required. The screenshot
+        // always begins below the returned title bottom, so title text can never overlap it.
+        var titleBottom = DrawAdaptiveTitle(g, step.Title, ink, 180, 156, 930, 132);
+        var screenTop = Math.Max(245f, titleBottom + 18f);
+
+        var screenRect = new RectangleF(105, screenTop, 1020, 560);
         g.FillRectangle(soft, screenRect);
         g.DrawRectangle(border, screenRect.X, screenRect.Y, screenRect.Width, screenRect.Height);
 
@@ -276,17 +195,17 @@ public sealed class ReliablePdfExportService
             DrawMissingScreenshot(g, screenRect, bodyFont, muted);
         }
 
-        y += 635;
+        var y = screenRect.Bottom + 18;
         g.DrawString(
             $"Captured screen for Step {step.Number}. The action and result are explained below.",
             captionFont,
             muted,
-            new RectangleF(105, y, 1020, 34));
-        y += 50;
+            new RectangleF(105, y, 1020, 32));
+        y += 46;
 
-        y = DrawTextSection(g, "HOW TO PERFORM", step.Instruction, 105, y, 1020, 135, labelFont, bodyFont, primary, ink, border) + 12;
-        y = DrawTextSection(g, "WHAT THIS DOES", step.Purpose, 105, y, 1020, 190, labelFont, bodyFont, primary, ink, border) + 12;
-        y = DrawTextSection(g, "EXPECTED RESULT", step.ExpectedResult, 105, y, 1020, 145, labelFont, bodyFont, primary, ink, border) + 14;
+        y = DrawTextSection(g, "HOW TO PERFORM", step.Instruction, 105, y, 1020, 120, labelFont, bodyFont, primary, ink, border) + 12;
+        y = DrawTextSection(g, "WHAT THIS DOES", step.Purpose, 105, y, 1020, 170, labelFont, bodyFont, primary, ink, border) + 12;
+        y = DrawTextSection(g, "EXPECTED RESULT", step.ExpectedResult, 105, y, 1020, 125, labelFont, bodyFont, primary, ink, border) + 14;
 
         var context = $"Action: {step.Action}   ·   Control: {step.Control}   ·   Application: {step.Application}" +
                       (string.IsNullOrWhiteSpace(step.Window) ? "" : $"   ·   Window: {step.Window}");
@@ -294,8 +213,45 @@ public sealed class ReliablePdfExportService
         g.DrawRectangle(border, 105, y, 1020, 62);
         g.DrawString(FitText(g, context, metaFont, 980, 42), metaFont, muted, new RectangleF(125, y + 16, 980, 36));
 
-        DrawFooter(g, step.Number + 1, document.Steps.Count + 1, captionFont, muted);
+        DrawFooter(g, pageNumber, document.Steps.Count, captionFont, muted);
         return EncodePage(bitmap);
+    }
+
+    private static float DrawAdaptiveTitle(
+        Graphics g,
+        string? value,
+        Brush brush,
+        float x,
+        float y,
+        float width,
+        float maxHeight)
+    {
+        var text = PrivacySanitizer.Clean(value, 500);
+        if (string.IsNullOrWhiteSpace(text)) text = "Recorded workflow step";
+
+        using var format = new StringFormat(StringFormat.GenericTypographic)
+        {
+            FormatFlags = StringFormatFlags.LineLimit,
+            Trimming = StringTrimming.EllipsisWord
+        };
+
+        float[] sizes = { 20f, 19f, 18f, 17f, 16f, 15f, 14f };
+        foreach (var size in sizes)
+        {
+            using var font = new Font("Segoe UI", size, FontStyle.Bold, GraphicsUnit.Point);
+            var measured = g.MeasureString(text, font, (int)width, format);
+            if (measured.Height <= maxHeight)
+            {
+                g.DrawString(text, font, brush, new RectangleF(x, y, width, maxHeight), format);
+                return y + measured.Height;
+            }
+        }
+
+        using var fallback = new Font("Segoe UI", 14f, FontStyle.Bold, GraphicsUnit.Point);
+        var fitted = FitText(g, text, fallback, width, maxHeight);
+        var fallbackSize = g.MeasureString(fitted, fallback, (int)width, format);
+        g.DrawString(fitted, fallback, brush, new RectangleF(x, y, width, maxHeight), format);
+        return y + Math.Min(maxHeight, fallbackSize.Height);
     }
 
     private static Bitmap NewPageBitmap()
@@ -435,27 +391,6 @@ public sealed class ReliablePdfExportService
         }
     }
 
-    private static float DrawOverviewBlock(
-        Graphics g,
-        string label,
-        string text,
-        float x,
-        float y,
-        float width,
-        float height,
-        Font labelFont,
-        Font bodyFont,
-        Brush labelBrush,
-        Brush bodyBrush,
-        Pen border)
-    {
-        g.DrawRectangle(border, x, y, width, height);
-        g.DrawString(label, labelFont, labelBrush, x + 18, y + 14);
-        var fitted = FitText(g, text, bodyFont, width - 36, height - 46);
-        g.DrawString(fitted, bodyFont, bodyBrush, new RectangleF(x + 18, y + 40, width - 36, height - 48));
-        return y + height;
-    }
-
     private static float DrawTextSection(
         Graphics g,
         string label,
@@ -475,41 +410,6 @@ public sealed class ReliablePdfExportService
         var fitted = FitText(g, text, bodyFont, width - 36, height - 45);
         g.DrawString(fitted, bodyFont, bodyBrush, new RectangleF(x + 18, y + 39, width - 36, height - 45));
         return y + height;
-    }
-
-    private static void DrawMetaCard(
-        Graphics g,
-        string label,
-        string value,
-        float x,
-        float y,
-        float width,
-        float height,
-        Font labelFont,
-        Font valueFont,
-        Brush labelBrush,
-        Brush valueBrush,
-        Pen border)
-    {
-        g.DrawRectangle(border, x, y, width, height);
-        g.DrawString(label, labelFont, labelBrush, x + 18, y + 15);
-        g.DrawString(FitText(g, value, valueFont, width - 36, 48), valueFont, valueBrush, new RectangleF(x + 18, y + 46, width - 36, 46));
-    }
-
-    private static float DrawFitText(
-        Graphics g,
-        string text,
-        Font font,
-        Brush brush,
-        float x,
-        float y,
-        float width,
-        float maxHeight)
-    {
-        var fitted = FitText(g, text, font, width, maxHeight);
-        var measured = g.MeasureString(fitted, font, new SizeF(width, maxHeight));
-        g.DrawString(fitted, font, brush, new RectangleF(x, y, width, maxHeight));
-        return y + Math.Min(maxHeight, measured.Height);
     }
 
     private static string FitText(Graphics g, string? value, Font font, float width, float maxHeight)
@@ -629,13 +529,7 @@ public sealed class ReliablePdfExportService
 
     private sealed record PdfDocumentData(
         string Title,
-        string Applications,
         string DocumentationType,
-        DateTimeOffset CreatedAt,
-        string Purpose,
-        string Scope,
-        string Prerequisites,
-        string CompletionCriteria,
         IReadOnlyList<PdfStepData> Steps);
 
     private sealed record PdfStepData(
