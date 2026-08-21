@@ -8,10 +8,17 @@ public sealed class LocalAiSetupService
     private static readonly TimeSpan InstallTimeout = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan PullTimeout = TimeSpan.FromMinutes(30);
 
-    public async Task<string> SetupAsync(Action<string>? log = null)
+    public Task<string> SetupAsync(Action<string>? log = null) =>
+        SetupAsync(AiProviderCatalog.Get("Ollama").DefaultModel, log);
+
+    public async Task<string> SetupAsync(string modelName, Action<string>? log = null)
     {
         if (IsElevated())
             return "For safety, automatic AI setup is disabled while SoplyraAI is running as Administrator. Restart it normally and retry.";
+
+        var model = AiProviderCatalog.LocalModels.FirstOrDefault(x => x.Equals(modelName, StringComparison.OrdinalIgnoreCase));
+        if (model is null)
+            return "That local model is not in SoplyraAI's trusted recommended-model list.";
 
         var ollama = FindOllama();
         if (ollama is null)
@@ -23,11 +30,7 @@ public sealed class LocalAiSetupService
             log?.Invoke("Ollama is not installed. Installing with Windows Package Manager…");
             var installCode = await RunAsync(
                 winget,
-                new[]
-                {
-                    "install", "--id", "Ollama.Ollama", "-e",
-                    "--accept-package-agreements", "--accept-source-agreements"
-                },
+                new[] { "install", "--id", "Ollama.Ollama", "-e", "--accept-package-agreements", "--accept-source-agreements" },
                 InstallTimeout,
                 log);
 
@@ -39,15 +42,10 @@ public sealed class LocalAiSetupService
                 return "Ollama installed, but SoplyraAI cannot locate its trusted executable yet. Restart SoplyraAI and retry.";
         }
 
-        log?.Invoke("Downloading the small local instruction model…");
-        var pullCode = await RunAsync(
-            ollama,
-            new[] { "pull", "qwen2.5:0.5b" },
-            PullTimeout,
-            log);
-
+        log?.Invoke($"Downloading {model}…");
+        var pullCode = await RunAsync(ollama, new[] { "pull", model }, PullTimeout, log);
         return pullCode == 0
-            ? "Local AI is ready: qwen2.5:0.5b"
+            ? $"Local AI is ready: {model}"
             : "Ollama is installed, but the model download failed.";
     }
 
@@ -55,32 +53,19 @@ public sealed class LocalAiSetupService
     {
         string[] candidates =
         {
-            Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Programs", "Ollama", "ollama.exe"),
-            Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-                "Ollama", "ollama.exe")
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Ollama", "ollama.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Ollama", "ollama.exe")
         };
-
-        return candidates
-            .Select(Path.GetFullPath)
-            .FirstOrDefault(File.Exists);
+        return candidates.Select(Path.GetFullPath).FirstOrDefault(File.Exists);
     }
 
     private static string? FindWinget()
     {
-        var path = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Microsoft", "WindowsApps", "winget.exe");
+        var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "WindowsApps", "winget.exe");
         return File.Exists(path) ? Path.GetFullPath(path) : null;
     }
 
-    private static async Task<int> RunAsync(
-        string file,
-        IEnumerable<string> args,
-        TimeSpan timeout,
-        Action<string>? log)
+    private static async Task<int> RunAsync(string file, IEnumerable<string> args, TimeSpan timeout, Action<string>? log)
     {
         try
         {
@@ -98,29 +83,17 @@ public sealed class LocalAiSetupService
                 CreateNoWindow = true,
                 WorkingDirectory = Path.GetDirectoryName(file)!
             };
-
             foreach (var arg in args) psi.ArgumentList.Add(arg);
 
             using var process = Process.Start(psi);
             if (process is null) return -1;
-
-            process.OutputDataReceived += (_, e) =>
-            {
-                if (e.Data is not null) log?.Invoke(PrivacySanitizer.Clean(e.Data, 500));
-            };
-            process.ErrorDataReceived += (_, e) =>
-            {
-                if (e.Data is not null) log?.Invoke(PrivacySanitizer.Clean(e.Data, 500));
-            };
+            process.OutputDataReceived += (_, e) => { if (e.Data is not null) log?.Invoke(PrivacySanitizer.Clean(e.Data, 500)); };
+            process.ErrorDataReceived += (_, e) => { if (e.Data is not null) log?.Invoke(PrivacySanitizer.Clean(e.Data, 500)); };
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
             using var cts = new CancellationTokenSource(timeout);
-            try
-            {
-                await process.WaitForExitAsync(cts.Token);
-                return process.ExitCode;
-            }
+            try { await process.WaitForExitAsync(cts.Token); return process.ExitCode; }
             catch (OperationCanceledException)
             {
                 try { process.Kill(entireProcessTree: true); } catch { }
@@ -140,12 +113,8 @@ public sealed class LocalAiSetupService
         try
         {
             using var identity = WindowsIdentity.GetCurrent();
-            return new WindowsPrincipal(identity)
-                .IsInRole(WindowsBuiltInRole.Administrator);
+            return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
         }
-        catch
-        {
-            return false;
-        }
+        catch { return false; }
     }
 }

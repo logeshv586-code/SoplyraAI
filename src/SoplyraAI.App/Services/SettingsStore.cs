@@ -22,7 +22,6 @@ public sealed class SettingsStore
         try
         {
             if (!File.Exists(_path)) return new AppSettings();
-
             var info = new FileInfo(_path);
             if (info.Length > 256 * 1024) return new AppSettings();
 
@@ -30,15 +29,23 @@ public sealed class SettingsStore
             var stored = JsonSerializer.Deserialize<PersistedSettings>(json, JsonOptions);
             if (stored is null) return new AppSettings();
 
+            var provider = PrivacySanitizer.Clean(stored.AiProvider, 40);
+            if (string.IsNullOrWhiteSpace(provider))
+                provider = stored.AiEndpoint.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase) ? "Ollama" : "OpenAI";
+            var option = AiProviderCatalog.Get(provider);
+
             var settings = new AppSettings
             {
-                UseLocalAi = stored.UseLocalAi,
-                AllowRemoteAi = stored.AllowRemoteAi,
-                AiEndpoint = PrivacySanitizer.Clean(stored.AiEndpoint, 2048),
-                AiModel = PrivacySanitizer.Clean(stored.AiModel, 120),
-                ScreenshotMode = string.Equals(stored.ScreenshotMode, "FullDesktop", StringComparison.OrdinalIgnoreCase)
-                    ? "FullDesktop"
-                    : "ActiveWindow",
+                UseLocalAi = AiProviderCatalog.IsLocal(provider),
+                AllowRemoteAi = !AiProviderCatalog.IsLocal(provider) && stored.AllowRemoteAi,
+                SendScreenshotsToAi = stored.SendScreenshotsToAi,
+                HasCompletedAiSetup = stored.HasCompletedAiSetup,
+                AiProvider = option.Id,
+                AiEndpoint = string.IsNullOrWhiteSpace(stored.AiEndpoint) ? option.Endpoint : PrivacySanitizer.Clean(stored.AiEndpoint, 2048),
+                AiModel = string.IsNullOrWhiteSpace(stored.AiModel) ? option.DefaultModel : PrivacySanitizer.Clean(stored.AiModel, 120),
+                DocumentationMode = stored.DocumentationMode == "Detailed" ? "Detailed" : "Quick",
+                DefaultExportFormat = NormalizeExport(stored.DefaultExportFormat),
+                ScreenshotMode = string.Equals(stored.ScreenshotMode, "FullDesktop", StringComparison.OrdinalIgnoreCase) ? "FullDesktop" : "ActiveWindow",
                 CaptureDelayMs = Math.Clamp(stored.CaptureDelayMs, 0, 1000),
                 AiApiKey = Unprotect(stored.ProtectedAiApiKey)
             };
@@ -46,8 +53,7 @@ public sealed class SettingsStore
             if (string.IsNullOrEmpty(settings.AiApiKey))
             {
                 using var doc = JsonDocument.Parse(json);
-                if (doc.RootElement.TryGetProperty("AiApiKey", out var legacy) &&
-                    legacy.ValueKind == JsonValueKind.String)
+                if (doc.RootElement.TryGetProperty("AiApiKey", out var legacy) && legacy.ValueKind == JsonValueKind.String)
                 {
                     settings.AiApiKey = legacy.GetString() ?? "";
                     Save(settings);
@@ -65,17 +71,20 @@ public sealed class SettingsStore
     public void Save(AppSettings settings)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-
+        var provider = AiProviderCatalog.Get(settings.AiProvider);
         var stored = new PersistedSettings
         {
-            UseLocalAi = settings.UseLocalAi,
-            AllowRemoteAi = settings.AllowRemoteAi,
-            AiEndpoint = PrivacySanitizer.Clean(settings.AiEndpoint, 2048),
+            UseLocalAi = AiProviderCatalog.IsLocal(provider.Id),
+            AllowRemoteAi = !AiProviderCatalog.IsLocal(provider.Id),
+            SendScreenshotsToAi = settings.SendScreenshotsToAi,
+            HasCompletedAiSetup = settings.HasCompletedAiSetup,
+            AiProvider = provider.Id,
+            AiEndpoint = provider.Endpoint,
             AiModel = PrivacySanitizer.Clean(settings.AiModel, 120),
             ProtectedAiApiKey = Protect(settings.AiApiKey),
-            ScreenshotMode = settings.ScreenshotMode.Equals("FullDesktop", StringComparison.OrdinalIgnoreCase)
-                ? "FullDesktop"
-                : "ActiveWindow",
+            DocumentationMode = settings.DocumentationMode == "Detailed" ? "Detailed" : "Quick",
+            DefaultExportFormat = NormalizeExport(settings.DefaultExportFormat),
+            ScreenshotMode = settings.ScreenshotMode.Equals("FullDesktop", StringComparison.OrdinalIgnoreCase) ? "FullDesktop" : "ActiveWindow",
             CaptureDelayMs = Math.Clamp(settings.CaptureDelayMs, 0, 1000)
         };
 
@@ -84,6 +93,15 @@ public sealed class SettingsStore
         File.WriteAllText(temp, json, new UTF8Encoding(false));
         File.Move(temp, _path, true);
     }
+
+    private static string NormalizeExport(string? value) =>
+        value?.ToUpperInvariant() switch
+        {
+            "HTML" => "HTML",
+            "WORD" => "Word",
+            "ALL" => "All",
+            _ => "PDF"
+        };
 
     private static string Protect(string? secret)
     {
@@ -94,14 +112,8 @@ public sealed class SettingsStore
             var encrypted = ProtectedData.Protect(data, null, DataProtectionScope.CurrentUser);
             return Convert.ToBase64String(encrypted);
         }
-        catch
-        {
-            return "";
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(data);
-        }
+        catch { return ""; }
+        finally { CryptographicOperations.ZeroMemory(data); }
     }
 
     private static string Unprotect(string? protectedSecret)
@@ -114,25 +126,22 @@ public sealed class SettingsStore
             plain = ProtectedData.Unprotect(encrypted, null, DataProtectionScope.CurrentUser);
             return Encoding.UTF8.GetString(plain);
         }
-        catch
-        {
-            return "";
-        }
-        finally
-        {
-            if (plain is not null) CryptographicOperations.ZeroMemory(plain);
-        }
+        catch { return ""; }
+        finally { if (plain is not null) CryptographicOperations.ZeroMemory(plain); }
     }
 
     private sealed class PersistedSettings
     {
-        public PersistedSettings() { }
-
         public bool UseLocalAi { get; set; } = true;
         public bool AllowRemoteAi { get; set; }
+        public bool SendScreenshotsToAi { get; set; }
+        public bool HasCompletedAiSetup { get; set; }
+        public string AiProvider { get; set; } = "Ollama";
         public string AiEndpoint { get; set; } = "http://127.0.0.1:11434/v1";
-        public string AiModel { get; set; } = "qwen2.5:0.5b";
+        public string AiModel { get; set; } = "qwen3:4b";
         public string ProtectedAiApiKey { get; set; } = "";
+        public string DocumentationMode { get; set; } = "Quick";
+        public string DefaultExportFormat { get; set; } = "PDF";
         public string ScreenshotMode { get; set; } = "ActiveWindow";
         public int CaptureDelayMs { get; set; } = 180;
     }
