@@ -155,6 +155,8 @@ internal static class SelfTestService
             var html = exporter.ExportHtml(session, exportFolder);
             var markdown = exporter.ExportMarkdown(session, exportFolder);
             var docx = exporter.ExportDocx(session, exportFolder);
+            var pdfExporter = new ReliablePdfExportService(exporter);
+            var pdf = pdfExporter.ExportAsync(session, exportFolder).GetAwaiter().GetResult();
 
             var htmlText = File.ReadAllText(html, Encoding.UTF8);
             if (!htmlText.Contains("Customer request workflow", StringComparison.Ordinal) ||
@@ -181,22 +183,33 @@ internal static class SelfTestService
                 markdownText.IndexOf("### How to perform", StringComparison.Ordinal))
                 throw new InvalidOperationException("Markdown screenshot must appear before the explanation.");
 
-            using var zip = ZipFile.OpenRead(docx);
-            var documentEntry = zip.GetEntry("word/document.xml") ??
-                throw new InvalidOperationException("DOCX export package is missing document.xml.");
-            using var reader = new StreamReader(documentEntry.Open(), Encoding.UTF8);
-            var documentXml = reader.ReadToEnd();
+            using (var zip = ZipFile.OpenRead(docx))
+            {
+                var documentEntry = zip.GetEntry("word/document.xml") ??
+                    throw new InvalidOperationException("DOCX export package is missing document.xml.");
+                using var reader = new StreamReader(documentEntry.Open(), Encoding.UTF8);
+                var documentXml = reader.ReadToEnd();
 
-            if (!documentXml.Contains("Customer request workflow", StringComparison.Ordinal) ||
-                !documentXml.Contains("Step 1: Save customer request", StringComparison.Ordinal) ||
-                !documentXml.Contains("Step 2: Click Submit", StringComparison.Ordinal) ||
-                !documentXml.Contains("How to perform", StringComparison.Ordinal) ||
-                !documentXml.Contains("What this does", StringComparison.Ordinal) ||
-                !documentXml.Contains("Expected result", StringComparison.Ordinal))
-                throw new InvalidOperationException("DOCX visible-content export test failed.");
+                if (!documentXml.Contains("Customer request workflow", StringComparison.Ordinal) ||
+                    !documentXml.Contains("Step 1: Save customer request", StringComparison.Ordinal) ||
+                    !documentXml.Contains("Step 2: Click Submit", StringComparison.Ordinal) ||
+                    !documentXml.Contains("How to perform", StringComparison.Ordinal) ||
+                    !documentXml.Contains("What this does", StringComparison.Ordinal) ||
+                    !documentXml.Contains("Expected result", StringComparison.Ordinal))
+                    throw new InvalidOperationException("DOCX visible-content export test failed.");
 
-            if (!zip.Entries.Any(entry => entry.FullName.StartsWith("word/media/", StringComparison.OrdinalIgnoreCase)))
-                throw new InvalidOperationException("DOCX screenshot embedding test failed.");
+                if (!zip.Entries.Any(entry => entry.FullName.StartsWith("word/media/", StringComparison.OrdinalIgnoreCase)))
+                    throw new InvalidOperationException("DOCX screenshot embedding test failed.");
+            }
+
+            if (string.IsNullOrWhiteSpace(pdf) || !File.Exists(pdf) || !ReliablePdfExportService.IsCompletePdf(pdf))
+                throw new InvalidOperationException("Native PDF export test failed.");
+
+            var pdfBytes = File.ReadAllBytes(pdf);
+            var pdfAscii = Encoding.ASCII.GetString(pdfBytes);
+            if (!pdfAscii.Contains("/Count 3", StringComparison.Ordinal) ||
+                pdfAscii.CountOccurrences("/Subtype /Image") < 3)
+                throw new InvalidOperationException("Native PDF does not contain the expected overview and step pages.");
         }
         finally
         {
