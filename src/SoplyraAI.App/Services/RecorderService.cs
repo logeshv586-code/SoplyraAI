@@ -60,9 +60,7 @@ public sealed class RecorderService : IDisposable
         try
         {
             var now = DateTimeOffset.Now;
-            if ((now - _lastCapture).TotalMilliseconds < 120 &&
-                Math.Abs(e.X - _lastX) < 5 &&
-                Math.Abs(e.Y - _lastY) < 5)
+            if ((now - _lastCapture).TotalMilliseconds < 120 && Math.Abs(e.X - _lastX) < 5 && Math.Abs(e.Y - _lastY) < 5)
                 return;
 
             _lastCapture = now;
@@ -71,36 +69,19 @@ public sealed class RecorderService : IDisposable
 
             var context = _ui.Capture(e.X, e.Y);
             PrivacySanitizer.SanitizeContext(context);
-
-            if (context.ProcessId == Environment.ProcessId) return;
-            if (IsShellSurface(context)) return;
+            if (context.ProcessId == Environment.ProcessId || IsShellSurface(context)) return;
 
             await Task.Delay(Math.Clamp(_settings.CaptureDelayMs, 0, 1000));
             if (_session is null) return;
 
             var number = _session.Steps.Count + 1;
-            var requestedImage = Path.Combine(
-                _session.SessionFolder,
-                "images",
-                $"step-{number:000}-{Guid.NewGuid():N}.png");
-
-            if (!PathSecurity.TryGetTrustedPng(
-                    _session.SessionFolder,
-                    requestedImage,
-                    out var trustedTarget,
-                    requireExists: false))
-                return;
+            var requestedImage = Path.Combine(_session.SessionFolder, "images", $"step-{number:000}-{Guid.NewGuid():N}.png");
+            if (!PathSecurity.TryGetTrustedPng(_session.SessionFolder, requestedImage, out var trustedTarget, requireExists: false)) return;
 
             _screens.Capture(trustedTarget, context, _settings.ScreenshotMode);
+            if (!PathSecurity.TryGetTrustedPng(_session.SessionFolder, trustedTarget, out var trustedImage, requireExists: true)) return;
 
-            if (!PathSecurity.TryGetTrustedPng(
-                    _session.SessionFolder,
-                    trustedTarget,
-                    out var trustedImage,
-                    requireExists: true))
-                return;
-
-            var text = _describer.DescribeFast(e.Action, context);
+            var text = _describer.DescribeFast(e.Action, context, _session.DocumentationMode);
             var step = new GuideStep
             {
                 Number = number,
@@ -119,10 +100,7 @@ public sealed class RecorderService : IDisposable
         {
             Debug.WriteLine(PrivacySanitizer.Clean(ex.Message, 500));
         }
-        finally
-        {
-            _captureGate.Release();
-        }
+        finally { _captureGate.Release(); }
     }
 
     private static bool IsShellSurface(UiContext c) =>
