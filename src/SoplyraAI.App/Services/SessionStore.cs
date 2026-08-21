@@ -72,6 +72,57 @@ public sealed class SessionStore
         return result.OrderByDescending(x => x.UpdatedAt).ToList();
     }
 
+    public bool DeleteStep(GuideSession session, Guid stepId)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+
+        var index = -1;
+        for (var i = 0; i < session.Steps.Count; i++)
+        {
+            if (session.Steps[i].Id == stepId)
+            {
+                index = i;
+                break;
+            }
+        }
+        if (index < 0) return false;
+
+        var step = session.Steps[index];
+        string? trustedScreenshot = null;
+        if (PathSecurity.TryGetTrustedPng(session.SessionFolder, step.ScreenshotPath, out var trusted, requireExists: false))
+            trustedScreenshot = trusted;
+
+        session.Steps.RemoveAt(index);
+        Renumber(session.Steps);
+
+        try
+        {
+            Save(session);
+        }
+        catch
+        {
+            session.Steps.Insert(Math.Min(index, session.Steps.Count), step);
+            Renumber(session.Steps);
+            throw;
+        }
+
+        if (!string.IsNullOrWhiteSpace(trustedScreenshot))
+        {
+            try
+            {
+                if (File.Exists(trustedScreenshot) && !PathSecurity.HasReparsePoint(session.SessionFolder, trustedScreenshot))
+                    File.Delete(trustedScreenshot);
+            }
+            catch
+            {
+                // The step is already safely removed from session.json. An orphaned screenshot is preferable
+                // to making the user's Remove action fail because Windows temporarily locked the image file.
+            }
+        }
+
+        return true;
+    }
+
     public bool Delete(Guid id)
     {
         var folder = GetSessionFolder(id);
@@ -94,8 +145,12 @@ public sealed class SessionStore
         session.Title = PrivacySanitizer.Clean(session.Title, 200);
         if (string.IsNullOrWhiteSpace(session.Title)) session.Title = "Untitled guide";
         session.DocumentationMode = session.DocumentationMode == "Detailed" ? "Detailed" : "Quick";
-        var cleanSteps = new ObservableCollection<GuideStep>();
-        foreach (var step in session.Steps.Take(MaxSteps))
+        session.Steps ??= new ObservableCollection<GuideStep>();
+
+        // Sanitize the existing live collection in place. Replacing ObservableCollection here breaks
+        // WPF ItemsSource bindings and caused per-step Remove actions to target a collection different
+        // from the one still shown on screen.
+        foreach (var step in session.Steps)
         {
             step.Action = PrivacySanitizer.Clean(step.Action, 40);
             step.Title = PrivacySanitizer.Clean(step.Title, 240);
@@ -104,9 +159,13 @@ public sealed class SessionStore
             PrivacySanitizer.SanitizeContext(step.Context);
             if (!PathSecurity.TryGetTrustedPng(session.SessionFolder, step.ScreenshotPath, out var trustedScreenshot, requireExistingScreenshots)) step.ScreenshotPath = "";
             else step.ScreenshotPath = trustedScreenshot;
-            cleanSteps.Add(step);
         }
-        session.Steps = cleanSteps;
-        for (var i = 0; i < session.Steps.Count; i++) session.Steps[i].Number = i + 1;
+
+        Renumber(session.Steps);
+    }
+
+    private static void Renumber(IList<GuideStep> steps)
+    {
+        for (var i = 0; i < steps.Count; i++) steps[i].Number = i + 1;
     }
 }
