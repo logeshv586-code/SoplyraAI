@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using SoplyraAI.Services;
 
 namespace SoplyraAI.Models;
 
@@ -23,7 +24,7 @@ public sealed class GuideStep : INotifyPropertyChanged
 
     public string Description
     {
-        get => _description;
+        get => StepNarrativeService.NormalizeStoredDescription(Action, Context, _title, _description);
         set { _description = value; OnPropertyChanged(); }
     }
 
