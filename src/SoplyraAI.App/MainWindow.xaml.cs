@@ -348,8 +348,6 @@ public partial class MainWindow : Window
                 return;
             }
 
-            // ObservableCollection notifies the UI immediately. Rebinding as well makes the Remove action
-            // deterministic even for guides that were loaded/saved by an older SoplyraAI build.
             StepsList.ItemsSource = null;
             StepsList.ItemsSource = _current.Steps;
             StepsList.Items.Refresh();
@@ -365,27 +363,6 @@ public partial class MainWindow : Window
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }
-    }
-
-    private void RenameGuide_Click(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        var session = (sender as FrameworkElement)?.DataContext as GuideSession ?? (sender as Button)?.Tag as GuideSession;
-        if (session is null) return;
-
-        if (_recorder.IsRecording) StopRecording();
-        if (session.Id != _current.Id)
-        {
-            _sessions.Save(_current);
-            _current = session;
-            BindCurrent();
-        }
-
-        SessionList.SelectedItem = SessionList.Items.Cast<object>()
-            .OfType<GuideSession>()
-            .FirstOrDefault(item => item.Id == _current.Id);
-        GuideTitle.Focus();
-        GuideTitle.SelectAll();
     }
 
     private void DeleteGuide_Click(object sender, RoutedEventArgs e)
