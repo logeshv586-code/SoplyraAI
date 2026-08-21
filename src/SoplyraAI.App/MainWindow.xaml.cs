@@ -30,6 +30,7 @@ public partial class MainWindow : Window
         _settings = _settingsStore.Load();
         var existing = _sessions.LoadAll();
         _current = existing.FirstOrDefault() ?? _sessions.Create("Untitled guide");
+        GuideTitle.TextChanged += GuideTitle_TextChanged;
         _recorder = NewRecorder();
 
         Loaded += (_, _) =>
@@ -44,6 +45,7 @@ public partial class MainWindow : Window
         {
             if (_recorder.IsRecording) _recorder.Stop();
             _recorder.Dispose();
+            SyncCurrentTitleFromEditor();
             _sessions.Save(_current);
         };
         BindCurrent();
@@ -69,11 +71,13 @@ public partial class MainWindow : Window
     private async Task ImproveCapturedStepAsync(GuideSession session, GuideStep step)
     {
         if (!_settings.HasCompletedAiSetup) return;
-        var improved = await _describer.ImproveAsync(step, session, _settings);
-        if (string.IsNullOrWhiteSpace(improved)) return;
+
+        var modelOutput = await _describer.ImproveAsync(step, session, _settings);
+        var decision = AiDescriptionQualityService.Resolve(step, session, modelOutput, _settings);
+
         await Dispatcher.InvokeAsync(() =>
         {
-            step.Description = improved;
+            step.Description = decision.Text;
             if (session.Id == _current.Id) StepsList.Items.Refresh();
             _sessions.Save(session);
         });
@@ -125,6 +129,7 @@ public partial class MainWindow : Window
     private void NewGuide_Click(object sender, RoutedEventArgs e)
     {
         if (_recorder.IsRecording) StopRecording();
+        SyncCurrentTitleFromEditor();
         _sessions.Save(_current);
         _current = _sessions.Create($"New guide {DateTime.Now:dd MMM HH:mm}");
         _current.DocumentationMode = _settings.DocumentationMode;
@@ -146,9 +151,7 @@ public partial class MainWindow : Window
         _settingsStore.Save(_settings);
         ModeStatusText.Text = modeWindow.SelectedMode == "Detailed" ? "Detailed SOP" : "Quick visual guide";
 
-        _current.Title = PrivacySanitizer.Clean(GuideTitle.Text, 200);
-        if (string.IsNullOrWhiteSpace(_current.Title)) _current.Title = "Untitled guide";
-        _sessions.Save(_current);
+        SyncCurrentTitleFromEditor();
         _recorder.Start(_current);
 
         _captureBar = new CaptureBarWindow();
@@ -184,17 +187,17 @@ public partial class MainWindow : Window
 
         ImproveButton.IsEnabled = false;
         ImproveButton.Content = "Improving…";
-        var improved = 0;
+        var acceptedAi = 0;
+        var groundedFallbacks = 0;
         try
         {
             foreach (var step in _current.Steps)
             {
-                var text = await _describer.ImproveAsync(step, _current, _settings);
-                if (!string.IsNullOrWhiteSpace(text))
-                {
-                    step.Description = text;
-                    improved++;
-                }
+                var modelOutput = await _describer.ImproveAsync(step, _current, _settings);
+                var decision = AiDescriptionQualityService.Resolve(step, _current, modelOutput, _settings);
+                step.Description = decision.Text;
+                if (decision.UsedAi) acceptedAi++;
+                else groundedFallbacks++;
             }
             _sessions.Save(_current);
             StepsList.Items.Refresh();
@@ -206,9 +209,10 @@ public partial class MainWindow : Window
         }
 
         MessageBox.Show(
-            improved > 0
-                ? $"Improved {improved} steps using {_settings.AiProvider}."
-                : "The configured AI could not improve the steps. Existing descriptions were kept.",
+            $"Description review complete using {_settings.AiProvider}.\n\n" +
+            $"Accepted grounded AI descriptions: {acceptedAi}\n" +
+            $"Protected by deterministic fallback: {groundedFallbacks}\n\n" +
+            "SoplyraAI keeps the stronger local description whenever a model returns generic, uncertain, or ungrounded wording.",
             "SoplyraAI");
     }
 
@@ -220,10 +224,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _current.Title = PrivacySanitizer.Clean(GuideTitle.Text, 200);
-        if (string.IsNullOrWhiteSpace(_current.Title)) _current.Title = "Untitled guide";
-        _sessions.Save(_current);
-
+        SyncCurrentTitleFromEditor();
         var format = (ExportFormatBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "PDF";
         await PerformExportAsync(_current, format);
     }
@@ -231,14 +232,22 @@ public partial class MainWindow : Window
     private async void ExportSidebarGuide_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: GuideSession session }) return;
-        if (session.Steps.Count == 0)
+
+        var exportSession = session;
+        if (session.Id == _current.Id)
+        {
+            SyncCurrentTitleFromEditor();
+            exportSession = _current;
+        }
+
+        if (exportSession.Steps.Count == 0)
         {
             MessageBox.Show("This guide does not contain any recorded steps to export.", "SoplyraAI");
             return;
         }
 
         var format = (ExportFormatBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "PDF";
-        await PerformExportAsync(session, format);
+        await PerformExportAsync(exportSession, format);
     }
 
     private async Task PerformExportAsync(GuideSession session, string formatOption)
@@ -251,38 +260,41 @@ public partial class MainWindow : Window
 
         try
         {
+            _sessions.Save(session);
             var folder = ExportService.NewExportFolder(session);
             var outputs = new List<string>();
             var warnings = new List<string>();
+
+            string Named(string generatedPath) => ExportFileNaming.RenameGeneratedFile(session, generatedPath);
 
             if (formatOption.Contains("PDF") && !formatOption.Contains("All"))
             {
                 var pdf = await _pdfExporter.ExportAsync(session, folder);
                 if (pdf is null)
                     throw new InvalidOperationException("PDF generation did not produce a file. Word and HTML export remain available.");
-                outputs.Add(pdf);
+                outputs.Add(Named(pdf));
             }
             else if (formatOption.Contains("Word") || formatOption.Contains("docx"))
             {
-                outputs.Add(_exporter.ExportDocx(session, folder));
+                outputs.Add(Named(_exporter.ExportDocx(session, folder)));
             }
             else if (formatOption.Contains("HTML") || formatOption.Contains("Web"))
             {
-                outputs.Add(_exporter.ExportHtml(session, folder));
+                outputs.Add(Named(_exporter.ExportHtml(session, folder)));
             }
             else if (formatOption.Contains("Markdown") || formatOption.Contains("MD"))
             {
-                outputs.Add(_exporter.ExportMarkdown(session, folder));
+                outputs.Add(Named(_exporter.ExportMarkdown(session, folder)));
             }
             else
             {
-                outputs.Add(_exporter.ExportHtml(session, folder));
-                outputs.Add(_exporter.ExportDocx(session, folder));
-                outputs.Add(_exporter.ExportMarkdown(session, folder));
+                outputs.Add(Named(_exporter.ExportHtml(session, folder)));
+                outputs.Add(Named(_exporter.ExportDocx(session, folder)));
+                outputs.Add(Named(_exporter.ExportMarkdown(session, folder)));
 
                 var pdf = await _pdfExporter.ExportAsync(session, folder);
                 if (pdf is not null)
-                    outputs.Add(pdf);
+                    outputs.Add(Named(pdf));
                 else
                     warnings.Add("PDF could not be generated; Word, HTML and Markdown were generated successfully.");
             }
@@ -394,18 +406,36 @@ public partial class MainWindow : Window
         StepsList.Items.Refresh();
     }
 
+    private void GuideTitle_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (!IsLoaded || sender is not TextBox box) return;
+        var title = PrivacySanitizer.Clean(box.Text, 200).Trim();
+        if (string.IsNullOrWhiteSpace(title) || string.Equals(title, _current.Title, StringComparison.Ordinal)) return;
+
+        _current.Title = title;
+        _sessions.Save(_current);
+    }
+
     private void GuideTitle_LostFocus(object sender, RoutedEventArgs e)
     {
-        _current.Title = PrivacySanitizer.Clean(GuideTitle.Text, 200);
-        if (string.IsNullOrWhiteSpace(_current.Title)) _current.Title = "Untitled guide";
-        _sessions.Save(_current);
+        SyncCurrentTitleFromEditor();
         RefreshSessions(selectCurrent: true);
+    }
+
+    private void SyncCurrentTitleFromEditor()
+    {
+        var title = PrivacySanitizer.Clean(GuideTitle.Text, 200).Trim();
+        _current.Title = string.IsNullOrWhiteSpace(title) ? "Untitled guide" : title;
+        if (!string.Equals(GuideTitle.Text, _current.Title, StringComparison.Ordinal))
+            GuideTitle.Text = _current.Title;
+        _sessions.Save(_current);
     }
 
     private void SessionList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (SessionList.SelectedItem is not GuideSession selected || selected.Id == _current.Id) return;
         if (_recorder.IsRecording) StopRecording();
+        SyncCurrentTitleFromEditor();
         _sessions.Save(_current);
         _current = selected;
         BindCurrent();
