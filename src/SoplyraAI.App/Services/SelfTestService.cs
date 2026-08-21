@@ -123,7 +123,7 @@ internal static class SelfTestService
                 Number = 1,
                 Action = "Click",
                 Title = "Click Egonex-AI/Understand-Anything: Graphs that teach > graphs that impress. Turn any code into an interactive knowledge graph you can explore, search, and ask questions",
-                Description = "Click Save to store the customer request before continuing.",
+                Description = "Click Save to store the customer request before continuing. Review the resulting screen and confirm that the information remains visible before continuing to the next recorded action.",
                 ScreenshotPath = imagePath,
                 Context = new UiContext
                 {
@@ -131,7 +131,7 @@ internal static class SelfTestService
                     ControlType = "Button",
                     LocalizedControlType = "button",
                     ProcessName = "ExampleApp",
-                    WindowTitle = "Customer Request"
+                    WindowTitle = "curl -X POST http://192.168.1.106:8000/api/very/long/path with request parameters and a long captured window title that must wrap without being hidden"
                 }
             });
             session.Steps.Add(new GuideStep
@@ -302,13 +302,34 @@ internal static class SelfTestService
                 throw new InvalidOperationException("Session creation test failed.");
 
             session.Title = "Customer Onboarding SOP";
+            var image = Path.Combine(session.SessionFolder, "images", "locked-step.png");
+            File.WriteAllBytes(image, Convert.FromBase64String(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="));
+            session.Steps.Add(new GuideStep { Number = 1, Title = "Locked screenshot step", ScreenshotPath = image });
             store.Save(session);
+
             var reloaded = store.LoadAll().FirstOrDefault(item => item.Id == session.Id);
             if (reloaded?.Title != "Customer Onboarding SOP")
                 throw new InvalidOperationException("Saved workflow rename persistence test failed.");
 
-            if (!store.Delete(session.Id) || Directory.Exists(session.SessionFolder))
-                throw new InvalidOperationException("Recent-guide deletion test failed.");
+            // Simulate the exact desktop problem: an image decoder/antivirus keeps the screenshot
+            // open while the user presses Delete. Logical deletion must still succeed immediately.
+            using (var locked = new FileStream(image, FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                if (!store.Delete(session.Id))
+                    throw new InvalidOperationException("Saved workflow deletion failed while a screenshot file was locked.");
+
+                var sessionJson = Path.Combine(session.SessionFolder, "session.json");
+                if (File.Exists(sessionJson))
+                    throw new InvalidOperationException("Deleted workflow session.json still exists.");
+                if (store.LoadAll().Any(item => item.Id == session.Id))
+                    throw new InvalidOperationException("Deleted workflow reappeared while its screenshot directory was awaiting cleanup.");
+            }
+
+            // Once the lock is released, LoadAll performs best-effort orphan cleanup.
+            _ = store.LoadAll();
+            if (store.LoadAll().Any(item => item.Id == session.Id))
+                throw new InvalidOperationException("Deleted workflow returned after cleanup.");
         }
         finally
         {
