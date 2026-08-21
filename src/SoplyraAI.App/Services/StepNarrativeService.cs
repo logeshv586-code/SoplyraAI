@@ -11,6 +11,34 @@ internal sealed record StepNarrative(
 
 internal static class StepNarrativeService
 {
+    public static string NormalizeStoredDescription(
+        string? action,
+        UiContext? context,
+        string? title,
+        string? storedDescription)
+    {
+        context ??= new UiContext();
+        var existing = PrivacySanitizer.Clean(storedDescription, 4000);
+        var control = Clean(
+            !string.IsNullOrWhiteSpace(context.LocalizedControlType)
+                ? context.LocalizedControlType
+                : context.ControlType,
+            100,
+            "control");
+        var element = Clean(context.ElementName, 180, "");
+        var application = Clean(context.ProcessName, 120, "application");
+        var window = Clean(context.WindowTitle, 240, "");
+        var generic = IsGenericTarget(element, control);
+
+        if (!ShouldReplaceExistingDescription(existing, generic))
+            return existing;
+
+        var semanticText = $"{element} {title}".ToLowerInvariant();
+        return PrivacySanitizer.Clean(
+            BuildPurpose(semanticText, control, generic, application, window),
+            2400);
+    }
+
     public static StepNarrative Build(GuideStep step, string? documentationMode = null)
     {
         var context = step.Context ?? new UiContext();
