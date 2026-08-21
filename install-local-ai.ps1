@@ -1,40 +1,30 @@
-$ErrorActionPreference = "Stop"
-
-$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-$principal = [Security.Principal.WindowsPrincipal]::new($identity)
-if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-  throw "For safety, run this setup script from a normal non-Administrator PowerShell window."
-}
-
-$ollamaCandidates = @(
-  (Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"),
-  (Join-Path $env:ProgramFiles "Ollama\ollama.exe")
+param(
+  [ValidateSet("qwen3:4b", "qwen2.5vl:3b", "deepseek-r1:7b", "gemma3:4b")]
+  [string]$Model = "qwen3:4b"
 )
 
-$ollama = $ollamaCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+$ErrorActionPreference = "Stop"
 
+function Find-Ollama {
+  $candidates = @(
+    "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe",
+    "$env:ProgramFiles\Ollama\ollama.exe"
+  )
+  return $candidates | Where-Object { $_ -and (Test-Path $_ -PathType Leaf) } | Select-Object -First 1
+}
+
+$ollama = Find-Ollama
 if (-not $ollama) {
-  $winget = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps\winget.exe"
-  if (-not (Test-Path -LiteralPath $winget -PathType Leaf)) {
-    throw "Windows Package Manager was not found. Install Ollama manually from its official source, then rerun this script."
-  }
-
-  Write-Host "Installing Ollama with Windows Package Manager..."
+  $winget = "$env:LOCALAPPDATA\Microsoft\WindowsApps\winget.exe"
+  if (-not (Test-Path $winget -PathType Leaf)) { throw "Windows Package Manager was not found. Install Ollama manually." }
+  Write-Host "Installing Ollama..."
   & $winget install --id Ollama.Ollama -e --accept-package-agreements --accept-source-agreements
-  if ($LASTEXITCODE -ne 0) {
-    throw "Ollama installation failed with exit code $LASTEXITCODE."
-  }
-
-  $ollama = $ollamaCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
-  if (-not $ollama) {
-    throw "Ollama was installed but its trusted executable path was not found. Restart PowerShell and retry."
-  }
+  if ($LASTEXITCODE -ne 0) { throw "Ollama installation failed." }
+  $ollama = Find-Ollama
+  if (-not $ollama) { throw "Ollama installed but its trusted executable was not found. Restart SoplyraAI and retry." }
 }
 
-Write-Host "Downloading qwen2.5:0.5b..."
-& $ollama pull qwen2.5:0.5b
-if ($LASTEXITCODE -ne 0) {
-  throw "Model download failed with exit code $LASTEXITCODE."
-}
-
-Write-Host "Local AI ready. Endpoint: http://127.0.0.1:11434/v1" -ForegroundColor Green
+Write-Host "Downloading $Model..."
+& $ollama pull $Model
+if ($LASTEXITCODE -ne 0) { throw "Model download failed." }
+Write-Host "Local AI ready: $Model · http://127.0.0.1:11434/v1" -ForegroundColor Green

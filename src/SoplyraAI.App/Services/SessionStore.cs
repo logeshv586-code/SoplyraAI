@@ -11,8 +11,12 @@ public sealed class SessionStore
     private const int MaxSteps = 5000;
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, MaxDepth = 32 };
 
-    public string RootFolder { get; } =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SoplyraAI", "Sessions");
+    public string RootFolder { get; }
+
+    public SessionStore(string? rootFolder = null)
+    {
+        RootFolder = rootFolder ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SoplyraAI", "Sessions");
+    }
 
     public GuideSession Create(string title)
     {
@@ -27,18 +31,14 @@ public sealed class SessionStore
     {
         if (session.Steps.Count > MaxSteps) throw new InvalidOperationException($"A guide cannot contain more than {MaxSteps} steps.");
         var folder = GetSessionFolder(session.Id);
-        if (Directory.Exists(folder) && PathSecurity.HasReparsePoint(RootFolder, folder))
-            throw new InvalidOperationException("The session directory is not a trusted local folder.");
-
+        if (Directory.Exists(folder) && PathSecurity.HasReparsePoint(RootFolder, folder)) throw new InvalidOperationException("The session directory is not a trusted local folder.");
         var imagesFolder = Path.Combine(folder, "images");
         Directory.CreateDirectory(imagesFolder);
-        if (PathSecurity.HasReparsePoint(folder, imagesFolder))
-            throw new InvalidOperationException("The session image directory is not a trusted local folder.");
+        if (PathSecurity.HasReparsePoint(folder, imagesFolder)) throw new InvalidOperationException("The session image directory is not a trusted local folder.");
 
         session.SessionFolder = folder;
         SanitizeSession(session, requireExistingScreenshots: false);
         session.UpdatedAt = DateTimeOffset.Now;
-
         var json = JsonSerializer.Serialize(session, JsonOptions);
         var path = Path.Combine(folder, "session.json");
         var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -57,15 +57,12 @@ public sealed class SessionStore
                 if (PathSecurity.HasReparsePoint(RootFolder, folder)) continue;
                 var directoryName = Path.GetFileName(folder);
                 if (!Guid.TryParseExact(directoryName, "N", out var expectedId)) continue;
-
                 var file = Path.Combine(folder, "session.json");
                 var info = new FileInfo(file);
                 if (!info.Exists || info.Length < 2 || info.Length > MaxSessionJsonBytes) continue;
                 if (PathSecurity.HasReparsePoint(RootFolder, file)) continue;
-
                 var session = JsonSerializer.Deserialize<GuideSession>(File.ReadAllText(file, Encoding.UTF8), JsonOptions);
                 if (session is null || session.Id != expectedId || session.Steps.Count > MaxSteps) continue;
-
                 session.SessionFolder = Path.GetFullPath(folder);
                 SanitizeSession(session, requireExistingScreenshots: true);
                 result.Add(session);
@@ -97,7 +94,6 @@ public sealed class SessionStore
         session.Title = PrivacySanitizer.Clean(session.Title, 200);
         if (string.IsNullOrWhiteSpace(session.Title)) session.Title = "Untitled guide";
         session.DocumentationMode = session.DocumentationMode == "Detailed" ? "Detailed" : "Quick";
-
         var cleanSteps = new ObservableCollection<GuideStep>();
         foreach (var step in session.Steps.Take(MaxSteps))
         {
@@ -106,14 +102,10 @@ public sealed class SessionStore
             step.Description = PrivacySanitizer.Clean(step.Description, 4000);
             step.Context ??= new UiContext();
             PrivacySanitizer.SanitizeContext(step.Context);
-
-            if (!PathSecurity.TryGetTrustedPng(session.SessionFolder, step.ScreenshotPath, out var trustedScreenshot, requireExistingScreenshots))
-                step.ScreenshotPath = "";
-            else
-                step.ScreenshotPath = trustedScreenshot;
+            if (!PathSecurity.TryGetTrustedPng(session.SessionFolder, step.ScreenshotPath, out var trustedScreenshot, requireExistingScreenshots)) step.ScreenshotPath = "";
+            else step.ScreenshotPath = trustedScreenshot;
             cleanSteps.Add(step);
         }
-
         session.Steps = cleanSteps;
         for (var i = 0; i < session.Steps.Count; i++) session.Steps[i].Number = i + 1;
     }
