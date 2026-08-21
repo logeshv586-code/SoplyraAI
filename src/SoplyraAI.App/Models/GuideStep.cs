@@ -18,7 +18,13 @@ public sealed class GuideStep : INotifyPropertyChanged
 
     public string Title
     {
-        get => _title;
+        get
+        {
+            var element = Context?.ElementName ?? "";
+            if (IsGenericBrowserSurface(_title) || IsGenericBrowserSurface(element))
+                return $"{(string.IsNullOrWhiteSpace(Action) ? "Click" : Action)} highlighted area";
+            return _title;
+        }
         set { _title = value; OnPropertyChanged(); }
     }
 
@@ -31,4 +37,12 @@ public sealed class GuideStep : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
     private void OnPropertyChanged([CallerMemberName] string? name = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+
+    private static bool IsGenericBrowserSurface(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        return value.Contains("Chrome Legacy Window", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("Chrome_RenderWidgetHostHWND", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("RenderWidgetHost", StringComparison.OrdinalIgnoreCase);
+    }
 }
