@@ -133,6 +133,7 @@ internal static partial class AiDescriptionQualityService
     {
         var source = $"{step.Context?.ElementName} {step.Title} {step.Context?.HelpText}";
         var tokens = WordRegex().Matches(source)
+            .Cast<Match>()
             .Select(match => match.Value)
             .Where(token => token.Length >= 4 && !StopWords.Contains(token))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -170,6 +171,7 @@ internal static partial class AiDescriptionQualityService
             return false;
 
         return WordRegex().Matches(candidate)
+            .Cast<Match>()
             .Select(match => match.Value)
             .Count(token => token.Length >= 5 && !StopWords.Contains(token)) >= 3;
     }
