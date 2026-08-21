@@ -171,10 +171,7 @@ internal static class StepNarrativeService
         if (control.Contains("tab", StringComparison.OrdinalIgnoreCase))
             return "This switches the application to the selected section so its controls and information become available.";
         if (generic)
-        {
-            var location = string.IsNullOrWhiteSpace(window) ? application : window;
-            return $"This activates the highlighted area in {location}. Windows did not expose a specific accessibility name for the clicked control, so the captured screenshot is the authoritative visual reference for this step.";
-        }
+            return $"This activates the highlighted area shown in the captured {VisualTargetLabel(application)}. Windows did not expose a specific accessibility name for the clicked control, so the screenshot is the authoritative visual reference for this step.";
         return "This activates the selected control so the application can proceed to the next recorded state.";
     }
 
