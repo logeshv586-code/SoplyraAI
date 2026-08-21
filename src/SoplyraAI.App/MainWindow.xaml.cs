@@ -15,6 +15,7 @@ public partial class MainWindow : Window
     private readonly SettingsStore _settingsStore = new();
     private readonly DescriptionService _describer = new();
     private readonly ExportService _exporter = new();
+    private readonly ReliablePdfExportService _pdfExporter;
     private readonly LocalAiSetupService _aiSetup = new();
     private AppSettings _settings;
     private RecorderService _recorder;
@@ -25,6 +26,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        _pdfExporter = new ReliablePdfExportService(_exporter);
         _settings = _settingsStore.Load();
         var existing = _sessions.LoadAll();
         _current = existing.FirstOrDefault() ?? _sessions.Create("Untitled guide");
@@ -116,7 +118,7 @@ public partial class MainWindow : Window
             "Word" => 2,
             "HTML" => 3,
             "Markdown" => 4,
-            _ => 0 // All Formats by default
+            _ => 0
         };
     }
 
@@ -188,7 +190,11 @@ public partial class MainWindow : Window
             foreach (var step in _current.Steps)
             {
                 var text = await _describer.ImproveAsync(step, _current, _settings);
-                if (!string.IsNullOrWhiteSpace(text)) { step.Description = text; improved++; }
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    step.Description = text;
+                    improved++;
+                }
             }
             _sessions.Save(_current);
             StepsList.Items.Refresh();
@@ -199,7 +205,11 @@ public partial class MainWindow : Window
             ImproveButton.IsEnabled = true;
         }
 
-        MessageBox.Show(improved > 0 ? $"Improved {improved} steps using {_settings.AiProvider}." : "The configured AI could not improve the steps. Existing descriptions were kept.", "SoplyraAI");
+        MessageBox.Show(
+            improved > 0
+                ? $"Improved {improved} steps using {_settings.AiProvider}."
+                : "The configured AI could not improve the steps. Existing descriptions were kept.",
+            "SoplyraAI");
     }
 
     private async void Export_Click(object sender, RoutedEventArgs e)
@@ -243,16 +253,14 @@ public partial class MainWindow : Window
         {
             var folder = ExportService.NewExportFolder(session);
             var outputs = new List<string>();
+            var warnings = new List<string>();
 
             if (formatOption.Contains("PDF") && !formatOption.Contains("All"))
             {
-                var pdf = await _exporter.ExportPdfAsync(session, folder);
-                if (pdf != null) outputs.Add(pdf);
-                else
-                {
-                    var fallbackHtml = _exporter.ExportHtml(session, folder);
-                    outputs.Add(fallbackHtml);
-                }
+                var pdf = await _pdfExporter.ExportAsync(session, folder);
+                if (pdf is null)
+                    throw new InvalidOperationException("PDF could not be completed by Microsoft Edge, Chrome, or Brave. Word and HTML export remain available.");
+                outputs.Add(pdf);
             }
             else if (formatOption.Contains("Word") || formatOption.Contains("docx"))
             {
@@ -266,11 +274,21 @@ public partial class MainWindow : Window
             {
                 outputs.Add(_exporter.ExportMarkdown(session, folder));
             }
-            else // All Formats
+            else
             {
-                var all = await _exporter.ExportAllFormatsAsync(session, folder);
-                outputs.AddRange(all);
+                outputs.Add(_exporter.ExportHtml(session, folder));
+                outputs.Add(_exporter.ExportDocx(session, folder));
+                outputs.Add(_exporter.ExportMarkdown(session, folder));
+
+                var pdf = await _pdfExporter.ExportAsync(session, folder);
+                if (pdf is not null)
+                    outputs.Add(pdf);
+                else
+                    warnings.Add("PDF could not be completed by an installed Chromium browser; Word, HTML and Markdown were generated successfully.");
             }
+
+            if (outputs.Count == 0)
+                throw new InvalidOperationException("No export file was generated.");
 
             var explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
             if (File.Exists(explorer))
@@ -281,11 +299,20 @@ public partial class MainWindow : Window
             }
 
             var fileList = string.Join("\n• ", outputs.Select(Path.GetFileName));
-            MessageBox.Show($"Export successfully generated for:\n“{session.Title}”\n\nExported Files:\n• {fileList}\n\nFolder:\n{folder}", "SoplyraAI Export Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+            var warningText = warnings.Count == 0 ? "" : "\n\nNotice:\n" + string.Join("\n", warnings);
+            MessageBox.Show(
+                $"Export successfully generated for:\n“{session.Title}”\n\nExported Files:\n• {fileList}{warningText}\n\nFolder:\n{folder}",
+                "SoplyraAI Export Complete",
+                MessageBoxButton.OK,
+                warnings.Count == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Export notice: {PrivacySanitizer.Clean(ex.Message, 500)}", "SoplyraAI", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(
+                $"Export could not be completed: {PrivacySanitizer.Clean(ex.Message, 500)}",
+                "SoplyraAI Export",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
         }
     }
 
@@ -316,7 +343,11 @@ public partial class MainWindow : Window
     private void DeleteGuide_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: GuideSession session }) return;
-        var confirm = MessageBox.Show($"Delete “{session.Title}” and its local screenshots?\n\nThis cannot be undone.", "Delete guide", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        var confirm = MessageBox.Show(
+            $"Delete “{session.Title}” and its local screenshots?\n\nThis cannot be undone.",
+            "Delete guide",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
         if (confirm != MessageBoxResult.Yes) return;
 
         if (session.Id == _current.Id && _recorder.IsRecording) StopRecording();
