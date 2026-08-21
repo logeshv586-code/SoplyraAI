@@ -14,6 +14,7 @@ internal static class SelfTestService
         TestSettingsSecretProtection();
         TestStructuredExportContent();
         TestPdfCompletenessValidator();
+        TestStepRemove();
         TestSessionRenameAndDelete();
     }
 
@@ -235,6 +236,54 @@ internal static class SelfTestService
                 throw new InvalidOperationException("Complete PDF validation test failed.");
             if (ReliablePdfExportService.IsCompletePdf(incomplete))
                 throw new InvalidOperationException("Incomplete PDF should not pass validation.");
+        }
+        finally
+        {
+            try { Directory.Delete(temp, true); } catch { }
+        }
+    }
+
+    private static void TestStepRemove()
+    {
+        var temp = Path.Combine(Path.GetTempPath(), "soplyraai-step-remove-selftest-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = new SessionStore(temp);
+            var session = store.Create("Step remove test");
+            var images = Path.Combine(session.SessionFolder, "images");
+            var firstImage = Path.Combine(images, "step-001.png");
+            File.WriteAllBytes(firstImage, Convert.FromBase64String(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="));
+
+            var first = new GuideStep { Number = 1, Title = "First", ScreenshotPath = firstImage };
+            var second = new GuideStep { Number = 2, Title = "Second" };
+            var third = new GuideStep { Number = 3, Title = "Third" };
+            session.Steps.Add(first);
+            session.Steps.Add(second);
+            session.Steps.Add(third);
+
+            var liveCollection = session.Steps;
+            store.Save(session);
+            if (!ReferenceEquals(liveCollection, session.Steps))
+                throw new InvalidOperationException("Saving a guide replaced its live step collection and would break WPF Remove bindings.");
+
+            if (!store.DeleteStep(session, second.Id))
+                throw new InvalidOperationException("Per-step removal returned false for an existing captured step.");
+            if (!ReferenceEquals(liveCollection, session.Steps))
+                throw new InvalidOperationException("Per-step removal replaced the live step collection.");
+            if (session.Steps.Count != 2 || session.Steps.Any(step => step.Id == second.Id))
+                throw new InvalidOperationException("Per-step removal did not remove the requested step.");
+            if (session.Steps[0].Number != 1 || session.Steps[1].Number != 2)
+                throw new InvalidOperationException("Remaining captured steps were not renumbered after removal.");
+
+            var reloaded = store.LoadAll().FirstOrDefault(item => item.Id == session.Id);
+            if (reloaded is null || reloaded.Steps.Count != 2 || reloaded.Steps.Any(step => step.Id == second.Id))
+                throw new InvalidOperationException("Per-step removal was not persisted to session storage.");
+
+            if (!store.DeleteStep(session, first.Id))
+                throw new InvalidOperationException("Screenshot-backed step removal failed.");
+            if (File.Exists(firstImage))
+                throw new InvalidOperationException("Removed step screenshot was not cleaned up.");
         }
         finally
         {
