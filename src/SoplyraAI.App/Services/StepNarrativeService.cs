@@ -127,9 +127,9 @@ internal static class StepNarrativeService
     private static string BuildPurpose(string text, string control, bool generic, string application, string window)
     {
         if (ContainsAny(text, "minimize"))
-            return "This minimizes the active window to the taskbar without closing it, allowing the workflow to continue in another window or application.";
+            return "This minimizes the active window to the taskbar without closing it, making other windows or applications accessible.";
         if (ContainsAny(text, "maximize"))
-            return "This expands the active window to use the available screen space so the next controls are easier to access.";
+            return "This expands the active window to use the available screen space so its controls are easier to access.";
         if (ContainsAny(text, "restore"))
             return "This returns the active window to its previous size and position.";
         if (ContainsAny(text, "save", "apply"))
@@ -167,7 +167,7 @@ internal static class StepNarrativeService
         if (ContainsAny(text, "refresh", "reload"))
             return "This reloads the current view so the latest information is displayed.";
         if (ContainsAny(text, "application") && !generic)
-            return "This switches focus to the selected application so the next workflow action can be performed there.";
+            return "This switches focus to the selected application so work can proceed there.";
         if (control.Contains("tab", StringComparison.OrdinalIgnoreCase))
             return "This switches the application to the selected section so its controls and information become available.";
         if (generic)
