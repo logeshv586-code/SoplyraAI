@@ -14,6 +14,10 @@
     <AssemblyName>SoplyraAI</AssemblyName>
     <RootNamespace>SoplyraAI</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\SoplyraAI.ico</ApplicationIcon>
+    <Product>SoplyraAI</Product>
+    <Description>AI Workflow Documentation for Windows</Description>
+    <Copyright>Copyright © SoplyraAI</Copyright>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
