@@ -201,14 +201,10 @@ internal static class SelfTestService
 
             if (ExportService.FindHeadlessBrowser() is not null)
             {
-                var pdf = exporter.ExportPdfAsync(session, exportFolder).GetAwaiter().GetResult();
-                if (string.IsNullOrWhiteSpace(pdf) || !File.Exists(pdf) || new FileInfo(pdf).Length < 4096)
-                    throw new InvalidOperationException("PDF export did not produce a populated file.");
-
-                using var pdfStream = File.OpenRead(pdf);
-                var header = new byte[5];
-                if (pdfStream.Read(header, 0, header.Length) != 5 || Encoding.ASCII.GetString(header) != "%PDF-")
-                    throw new InvalidOperationException("PDF export header validation failed.");
+                var pdfExporter = new ReliablePdfExportService(exporter);
+                var pdf = pdfExporter.ExportAsync(session, exportFolder).GetAwaiter().GetResult();
+                if (string.IsNullOrWhiteSpace(pdf) || !ReliablePdfExportService.IsCompletePdf(pdf))
+                    throw new InvalidOperationException("PDF export did not produce a complete populated PDF.");
             }
         }
         finally
