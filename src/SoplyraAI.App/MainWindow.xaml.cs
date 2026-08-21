@@ -110,7 +110,14 @@ public partial class MainWindow : Window
 
     private void ApplyExportSelection()
     {
-        ExportFormatBox.SelectedIndex = _settings.DefaultExportFormat switch { "Word" => 1, "HTML" => 2, "All" => 3, _ => 0 };
+        ExportFormatBox.SelectedIndex = _settings.DefaultExportFormat switch
+        {
+            "PDF" => 1,
+            "Word" => 2,
+            "HTML" => 3,
+            "Markdown" => 4,
+            _ => 0 // All Formats by default
+        };
     }
 
     private void NewGuide_Click(object sender, RoutedEventArgs e)
@@ -203,34 +210,66 @@ public partial class MainWindow : Window
             return;
         }
 
+        _current.Title = PrivacySanitizer.Clean(GuideTitle.Text, 200);
+        if (string.IsNullOrWhiteSpace(_current.Title)) _current.Title = "Untitled guide";
+        _sessions.Save(_current);
+
+        var format = (ExportFormatBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "PDF";
+        await PerformExportAsync(_current, format);
+    }
+
+    private async void ExportSidebarGuide_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: GuideSession session }) return;
+        if (session.Steps.Count == 0)
+        {
+            MessageBox.Show("This guide does not contain any recorded steps to export.", "SoplyraAI");
+            return;
+        }
+
+        var format = (ExportFormatBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "PDF";
+        await PerformExportAsync(session, format);
+    }
+
+    private async Task PerformExportAsync(GuideSession session, string formatOption)
+    {
+        if (session.Steps.Count == 0)
+        {
+            MessageBox.Show("This guide contains 0 steps. Capture at least one step before exporting.", "SoplyraAI");
+            return;
+        }
+
         try
         {
-            _current.Title = PrivacySanitizer.Clean(GuideTitle.Text, 200);
-            if (string.IsNullOrWhiteSpace(_current.Title)) _current.Title = "Untitled guide";
-            _sessions.Save(_current);
-
-            var format = (ExportFormatBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "PDF";
-            _settings.DefaultExportFormat = format;
-            _settingsStore.Save(_settings);
-            var folder = ExportService.NewExportFolder(_current);
+            var folder = ExportService.NewExportFolder(session);
             var outputs = new List<string>();
 
-            switch (format)
+            if (formatOption.Contains("PDF") && !formatOption.Contains("All"))
             {
-                case "HTML": outputs.Add(_exporter.ExportHtml(_current, folder)); break;
-                case "Word": outputs.Add(_exporter.ExportDocx(_current, folder)); break;
-                case "All":
-                    outputs.Add(_exporter.ExportHtml(_current, folder));
-                    outputs.Add(_exporter.ExportDocx(_current, folder));
-                    outputs.Add(_exporter.ExportMarkdown(_current, folder));
-                    var allPdf = await _exporter.ExportPdfAsync(_current, folder);
-                    if (allPdf is not null) outputs.Add(allPdf);
-                    break;
-                default:
-                    var pdf = await _exporter.ExportPdfAsync(_current, folder);
-                    if (pdf is null) throw new InvalidOperationException("PDF export needs Microsoft Edge or Google Chrome. HTML and Word export are still available.");
-                    outputs.Add(pdf);
-                    break;
+                var pdf = await _exporter.ExportPdfAsync(session, folder);
+                if (pdf != null) outputs.Add(pdf);
+                else
+                {
+                    var fallbackHtml = _exporter.ExportHtml(session, folder);
+                    outputs.Add(fallbackHtml);
+                }
+            }
+            else if (formatOption.Contains("Word") || formatOption.Contains("docx"))
+            {
+                outputs.Add(_exporter.ExportDocx(session, folder));
+            }
+            else if (formatOption.Contains("HTML") || formatOption.Contains("Web"))
+            {
+                outputs.Add(_exporter.ExportHtml(session, folder));
+            }
+            else if (formatOption.Contains("Markdown") || formatOption.Contains("MD"))
+            {
+                outputs.Add(_exporter.ExportMarkdown(session, folder));
+            }
+            else // All Formats
+            {
+                var all = await _exporter.ExportAllFormatsAsync(session, folder);
+                outputs.AddRange(all);
             }
 
             var explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
@@ -240,11 +279,13 @@ public partial class MainWindow : Window
                 psi.ArgumentList.Add(folder);
                 Process.Start(psi);
             }
-            MessageBox.Show($"Export completed: {outputs.Count} file(s).\n\n{folder}", "SoplyraAI");
+
+            var fileList = string.Join("\n• ", outputs.Select(Path.GetFileName));
+            MessageBox.Show($"Export successfully generated for:\n“{session.Title}”\n\nExported Files:\n• {fileList}\n\nFolder:\n{folder}", "SoplyraAI Export Complete", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Export could not be completed: {PrivacySanitizer.Clean(ex.Message, 400)}", "SoplyraAI", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show($"Export notice: {PrivacySanitizer.Clean(ex.Message, 500)}", "SoplyraAI", MessageBoxButton.OK, MessageBoxImage.Information);
         }
     }
 

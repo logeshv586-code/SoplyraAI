@@ -14,6 +14,29 @@ internal static class SelfTestService
         TestSettingsSecretProtection();
         TestExportHardening();
         TestSessionDelete();
+        TestExportAllRealSessions();
+    }
+
+    public static void TestExportAllRealSessions()
+    {
+        var store = new SessionStore();
+        var sessions = store.LoadAll();
+        Console.WriteLine($"[DIAGNOSTIC] Total sessions loaded: {sessions.Count}");
+        var exporter = new ExportService();
+        foreach (var s in sessions)
+        {
+            Console.WriteLine($"Testing Session: '{s.Title}' (ID: {s.Id}, Steps: {s.Steps.Count}, Folder: '{s.SessionFolder}')");
+            var tempFolder = Path.Combine(Path.GetTempPath(), "soplyra-diag-" + s.Id.ToString("N"));
+            var html = exporter.ExportHtml(s, tempFolder);
+            Console.WriteLine($"  HTML: {html} (Size: {new FileInfo(html).Length})");
+            var md = exporter.ExportMarkdown(s, tempFolder);
+            Console.WriteLine($"  MD: {md} (Size: {new FileInfo(md).Length})");
+            var docx = exporter.ExportDocx(s, tempFolder);
+            Console.WriteLine($"  DOCX: {docx} (Size: {new FileInfo(docx).Length})");
+            var pdf = exporter.ExportPdfAsync(s, tempFolder).GetAwaiter().GetResult();
+            Console.WriteLine($"  PDF: {pdf ?? "FAILED"}");
+            if (pdf != null) Console.WriteLine($"  PDF Size: {new FileInfo(pdf).Length}");
+        }
     }
 
     private static void TestDescriptionModes()
