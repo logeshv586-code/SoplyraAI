@@ -259,7 +259,7 @@ public partial class MainWindow : Window
             {
                 var pdf = await _pdfExporter.ExportAsync(session, folder);
                 if (pdf is null)
-                    throw new InvalidOperationException("PDF could not be completed by Microsoft Edge, Chrome, or Brave. Word and HTML export remain available.");
+                    throw new InvalidOperationException("PDF generation did not produce a file. Word and HTML export remain available.");
                 outputs.Add(pdf);
             }
             else if (formatOption.Contains("Word") || formatOption.Contains("docx"))
@@ -284,7 +284,7 @@ public partial class MainWindow : Window
                 if (pdf is not null)
                     outputs.Add(pdf);
                 else
-                    warnings.Add("PDF could not be completed by an installed Chromium browser; Word, HTML and Markdown were generated successfully.");
+                    warnings.Add("PDF could not be generated; Word, HTML and Markdown were generated successfully.");
             }
 
             if (outputs.Count == 0)
@@ -331,13 +331,61 @@ public partial class MainWindow : Window
 
     private void DeleteStep_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: GuideStep step })
+        e.Handled = true;
+        var element = sender as FrameworkElement;
+        var step = element?.DataContext as GuideStep ?? (sender as Button)?.Tag as GuideStep;
+        if (step is null) return;
+
+        try
         {
-            _current.Steps.Remove(step);
-            Renumber();
-            _sessions.Save(_current);
+            if (!_sessions.DeleteStep(_current, step.Id))
+            {
+                MessageBox.Show(
+                    "This captured step could not be found in the active guide. Reload the guide and try again.",
+                    "SoplyraAI",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            // ObservableCollection notifies the UI immediately. Rebinding as well makes the Remove action
+            // deterministic even for guides that were loaded/saved by an older SoplyraAI build.
+            StepsList.ItemsSource = null;
+            StepsList.ItemsSource = _current.Steps;
+            StepsList.Items.Refresh();
             SetHasSteps(_current.Steps.Count > 0);
+            _captureBar?.SetStepCount(_current.Steps.Count);
+            RefreshSessions(selectCurrent: true);
         }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"The captured step could not be removed safely: {PrivacySanitizer.Clean(ex.Message, 300)}",
+                "SoplyraAI",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    private void RenameGuide_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        var session = (sender as FrameworkElement)?.DataContext as GuideSession ?? (sender as Button)?.Tag as GuideSession;
+        if (session is null) return;
+
+        if (_recorder.IsRecording) StopRecording();
+        if (session.Id != _current.Id)
+        {
+            _sessions.Save(_current);
+            _current = session;
+            BindCurrent();
+        }
+
+        SessionList.SelectedItem = SessionList.Items.Cast<object>()
+            .OfType<GuideSession>()
+            .FirstOrDefault(item => item.Id == _current.Id);
+        GuideTitle.Focus();
+        GuideTitle.SelectAll();
     }
 
     private void DeleteGuide_Click(object sender, RoutedEventArgs e)
