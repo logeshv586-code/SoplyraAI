@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="SoplyraAI">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5B4BFF"/>
+      <stop offset="0.52" stop-color="#2937D9"/>
+      <stop offset="1" stop-color="#071B63"/>
+    </linearGradient>
+    <linearGradient id="ribbon" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#EEF4FF"/>
+      <stop offset="0.28" stop-color="#7AE8FF"/>
+      <stop offset="0.58" stop-color="#7C5CFF"/>
+      <stop offset="0.82" stop-color="#E45CFF"/>
+      <stop offset="1" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity=".26"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#06123E" flood-opacity=".35"/>
+    </filter>
+  </defs>
+  <rect x="6" y="6" width="116" height="116" rx="28" fill="url(#bg)"/>
+  <rect x="7.5" y="7.5" width="113" height="113" rx="26.5" fill="none" stroke="#7DEBFF" stroke-opacity=".38" stroke-width="3"/>
+  <path d="M31 39 C43 24 79 24 96 38 C104 45 99 55 91 56 C78 57 66 48 52 49 C43 49 39 53 40 58 C41 64 51 67 66 70 C85 74 99 82 99 96 C99 113 82 119 64 119 C47 119 32 113 24 103" fill="none" stroke="#05184F" stroke-opacity=".42" stroke-width="25" stroke-linecap="round" stroke-linejoin="round" filter="url(#shadow)"/>
+  <path d="M31 37 C43 23 79 23 96 37 C102 42 100 50 93 52 C81 54 68 46 53 47 C43 47 37 52 39 59 C41 66 51 69 67 72 C86 76 98 84 98 97 C98 112 82 118 64 118 C47 118 33 112 25 102" fill="none" stroke="url(#ribbon)" stroke-width="19" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M34 34 C49 24 78 26 92 36" fill="none" stroke="url(#shine)" stroke-width="7" stroke-linecap="round"/>
+</svg>
