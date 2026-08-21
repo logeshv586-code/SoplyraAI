@@ -1,0 +1,10 @@
+# Security-sensitive ownership
+* @logeshv586-code
+
+/.github/workflows/ @logeshv586-code
+/src/SoplyraAI.App/Services/ @logeshv586-code
+/src/SoplyraAI.App/Models/ @logeshv586-code
+/installer.iss @logeshv586-code
+/install-local-ai.ps1 @logeshv586-code
+/SECURITY.md @logeshv586-code
+/docs/THREAT_MODEL.md @logeshv586-code

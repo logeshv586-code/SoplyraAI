@@ -62,24 +62,31 @@ public sealed class RecorderService : IDisposable
             var now = DateTimeOffset.Now;
             if ((now - _lastCapture).TotalMilliseconds < 120 && Math.Abs(e.X - _lastX) < 5 && Math.Abs(e.Y - _lastY) < 5)
                 return;
-            _lastCapture = now; _lastX = e.X; _lastY = e.Y;
+
+            _lastCapture = now;
+            _lastX = e.X;
+            _lastY = e.Y;
 
             var context = _ui.Capture(e.X, e.Y);
-            if (context.ProcessId == Environment.ProcessId) return;
-            if (IsShellSurface(context)) return;
+            PrivacySanitizer.SanitizeContext(context);
+            if (context.ProcessId == Environment.ProcessId || IsShellSurface(context)) return;
 
             await Task.Delay(Math.Clamp(_settings.CaptureDelayMs, 0, 1000));
             if (_session is null) return;
 
             var number = _session.Steps.Count + 1;
-            var image = Path.Combine(_session.SessionFolder, "images", $"step-{number:000}-{Guid.NewGuid():N}.png");
-            _screens.Capture(image, context, _settings.ScreenshotMode);
-            var text = _describer.DescribeFast(e.Action, context);
+            var requestedImage = Path.Combine(_session.SessionFolder, "images", $"step-{number:000}-{Guid.NewGuid():N}.png");
+            if (!PathSecurity.TryGetTrustedPng(_session.SessionFolder, requestedImage, out var trustedTarget, requireExists: false)) return;
+
+            _screens.Capture(trustedTarget, context, _settings.ScreenshotMode);
+            if (!PathSecurity.TryGetTrustedPng(_session.SessionFolder, trustedTarget, out var trustedImage, requireExists: true)) return;
+
+            var text = _describer.DescribeFast(e.Action, context, _session.DocumentationMode);
             var step = new GuideStep
             {
                 Number = number,
-                Action = e.Action,
-                ScreenshotPath = image,
+                Action = PrivacySanitizer.Clean(e.Action, 40),
+                ScreenshotPath = trustedImage,
                 Context = context,
                 Title = text.title,
                 Description = text.description
@@ -91,12 +98,9 @@ public sealed class RecorderService : IDisposable
         }
         catch (Exception ex)
         {
-            Debug.WriteLine(ex);
+            Debug.WriteLine(PrivacySanitizer.Clean(ex.Message, 500));
         }
-        finally
-        {
-            _captureGate.Release();
-        }
+        finally { _captureGate.Release(); }
     }
 
     private static bool IsShellSurface(UiContext c) =>

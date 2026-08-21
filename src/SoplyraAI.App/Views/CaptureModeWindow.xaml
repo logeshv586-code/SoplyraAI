@@ -1,0 +1,51 @@
+<Window x:Class="SoplyraAI.Views.CaptureModeWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Choose documentation style" Width="720" Height="480" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" Background="#F7F8FC">
+    <Grid Margin="30">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <StackPanel>
+            <TextBlock Text="How should this guide be written?" FontSize="28" FontWeight="SemiBold" Foreground="#171824"/>
+            <TextBlock Text="Both modes capture the screen. Choose how much explanation you want for every click." Foreground="#73778D" FontSize="13" Margin="0,7,0,0"/>
+        </StackPanel>
+
+        <Grid Grid.Row="1" Margin="0,26,0,24">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Border Background="White" BorderBrush="#DCDFF0" BorderThickness="1" CornerRadius="18" Padding="22">
+                <StackPanel>
+                    <Border Width="48" Height="48" CornerRadius="14" Background="#F0EDFF" HorizontalAlignment="Left">
+                        <TextBlock Text="⚡" FontSize="22" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <RadioButton x:Name="QuickRadio" GroupName="Mode" IsChecked="True" Content="Quick visual guide" FontWeight="SemiBold" FontSize="18" Margin="0,18,0,8"/>
+                    <TextBlock Text="Screenshot + a short sentence describing exactly what was clicked and what it does." TextWrapping="Wrap" Foreground="#73778D" LineHeight="20"/>
+                    <Border Background="#F7F6FF" CornerRadius="10" Padding="12" Margin="0,18,0,0">
+                        <TextBlock Text="Example: Click “Submit” to send the completed request." TextWrapping="Wrap" Foreground="#5950C9"/>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Column="2" Background="White" BorderBrush="#CFC8FF" BorderThickness="2" CornerRadius="18" Padding="22">
+                <StackPanel>
+                    <Border Width="48" Height="48" CornerRadius="14" Background="#EAF7F2" HorizontalAlignment="Left">
+                        <TextBlock Text="✦" FontSize="22" Foreground="#13986B" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <RadioButton x:Name="DetailedRadio" GroupName="Mode" Content="Detailed SOP" FontWeight="SemiBold" FontSize="18" Margin="0,18,0,8"/>
+                    <TextBlock Text="Screenshot + 2–4 concise lines explaining the clicked control, expected result, and workflow context." TextWrapping="Wrap" Foreground="#73778D" LineHeight="20"/>
+                    <Border Background="#F1FAF7" CornerRadius="10" Padding="12" Margin="0,18,0,0">
+                        <TextBlock Text="Best with AI. If vision is enabled, the model can inspect the captured screenshot too." TextWrapping="Wrap" Foreground="#21795E"/>
+                    </Border>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Cancel" Style="{StaticResource GhostButton}" Click="Cancel_Click"/>
+            <Button Content="Start capture  →" Style="{StaticResource PrimaryButton}" Margin="0" Click="Start_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>
