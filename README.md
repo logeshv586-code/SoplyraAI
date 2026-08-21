@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/soplyraai-logo.webp" alt="SoplyraAI logo" width="112" />
+  <img src="docs/images/soplyraai-logo.svg" alt="SoplyraAI logo" width="112" />
 </p>
 
 <h1 align="center">SoplyraAI</h1>
@@ -241,7 +241,7 @@ SoplyraAI/
 │  └─ SoplyraAI.App.csproj
 ├─ docs/
 │  ├─ images/
-│  │  ├─ soplyraai-logo.webp
+│  │  ├─ soplyraai-logo.svg
 │  │  ├─ soplyraai-hero.webp
 │  │  └─ soplyraai-app.webp
 │  ├─ PRIVACY.md
@@ -298,7 +298,7 @@ Contributions are welcome in Windows capture reliability, UI Automation edge cas
 MIT. See [`LICENSE`](LICENSE).
 
 <p align="center">
-  <img src="docs/images/soplyraai-logo.webp" alt="SoplyraAI" width="64" />
+  <img src="docs/images/soplyraai-logo.svg" alt="SoplyraAI" width="64" />
 </p>
 <p align="center">
   <strong>SoplyraAI</strong><br/>
