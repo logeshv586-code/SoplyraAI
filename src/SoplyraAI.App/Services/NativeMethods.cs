@@ -13,6 +13,8 @@ internal static class NativeMethods
     internal const int SM_YVIRTUALSCREEN = 77;
     internal const int SM_CXVIRTUALSCREEN = 78;
     internal const int SM_CYVIRTUALSCREEN = 79;
+    internal const uint WDA_NONE = 0x00000000;
+    internal const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
 
     internal delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
 
@@ -62,4 +64,8 @@ internal static class NativeMethods
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     internal static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
 }
