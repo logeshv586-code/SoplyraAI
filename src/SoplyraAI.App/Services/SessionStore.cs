@@ -59,7 +59,17 @@ public sealed class SessionStore
                 if (!Guid.TryParseExact(directoryName, "N", out var expectedId)) continue;
                 var file = Path.Combine(folder, "session.json");
                 var info = new FileInfo(file);
-                if (!info.Exists || info.Length < 2 || info.Length > MaxSessionJsonBytes) continue;
+
+                // A folder without session.json is a previously deleted workflow whose screenshot
+                // files may have been temporarily locked by Windows/WPF. It must never reappear in
+                // Saved Workflows; clean it up opportunistically when the lock is gone.
+                if (!info.Exists)
+                {
+                    TryCleanupDeletedFolder(folder);
+                    continue;
+                }
+
+                if (info.Length < 2 || info.Length > MaxSessionJsonBytes) continue;
                 if (PathSecurity.HasReparsePoint(RootFolder, file)) continue;
                 var session = JsonSerializer.Deserialize<GuideSession>(File.ReadAllText(file, Encoding.UTF8), JsonOptions);
                 if (session is null || session.Id != expectedId || session.Steps.Count > MaxSteps) continue;
@@ -132,13 +142,40 @@ public sealed class SessionStore
             if (PathSecurity.HasReparsePoint(RootFolder, folder)) return false;
             var images = Path.Combine(folder, "images");
             if (Directory.Exists(images) && PathSecurity.HasReparsePoint(folder, images)) return false;
-            Directory.Delete(folder, recursive: true);
-            return true;
+
+            // Remove session.json first. This is the authoritative logical delete: once this file
+            // is gone the workflow cannot be loaded or reappear in Saved Workflows, even if one
+            // screenshot is still held open by the WPF image decoder or antivirus software.
+            var sessionFile = Path.Combine(folder, "session.json");
+            if (File.Exists(sessionFile))
+            {
+                if (PathSecurity.HasReparsePoint(folder, sessionFile)) return false;
+                File.Delete(sessionFile);
+            }
+
+            TryCleanupDeletedFolder(folder);
+            return !File.Exists(sessionFile);
         }
-        catch { return false; }
+        catch
+        {
+            return false;
+        }
     }
 
     private string GetSessionFolder(Guid id) => Path.Combine(RootFolder, id.ToString("N"));
+
+    private static void TryCleanupDeletedFolder(string folder)
+    {
+        try
+        {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+        catch
+        {
+            // Logical deletion is already complete because session.json is absent. The remaining
+            // orphaned image directory is retried on the next LoadAll/application start.
+        }
+    }
 
     private static void SanitizeSession(GuideSession session, bool requireExistingScreenshots)
     {
@@ -147,9 +184,6 @@ public sealed class SessionStore
         session.DocumentationMode = session.DocumentationMode == "Detailed" ? "Detailed" : "Quick";
         session.Steps ??= new ObservableCollection<GuideStep>();
 
-        // Sanitize the existing live collection in place. Replacing ObservableCollection here breaks
-        // WPF ItemsSource bindings and caused per-step Remove actions to target a collection different
-        // from the one still shown on screen.
         foreach (var step in session.Steps)
         {
             step.Action = PrivacySanitizer.Clean(step.Action, 40);
