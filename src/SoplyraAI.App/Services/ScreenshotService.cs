@@ -18,7 +18,7 @@ public sealed class ScreenshotService
         using var bitmap = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(bitmap))
         {
-            g.CopyFromScreen(bounds.Left, bounds.Top, 0, 0, bounds.Size, CopyPixelOperation.SourceCopy);
+            CopyScreenWithoutRecorderOverlay(g, bounds);
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
 
             var clickX = context.ClickX - bounds.Left;
@@ -55,6 +55,33 @@ public sealed class ScreenshotService
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
         bitmap.Save(outputPath, ImageFormat.Png);
         return outputPath;
+    }
+
+    private static void CopyScreenWithoutRecorderOverlay(Graphics graphics, Rectangle bounds)
+    {
+        IntPtr hiddenOverlay = IntPtr.Zero;
+        try
+        {
+            // On supported Windows versions WDA_EXCLUDEFROMCAPTURE removes the floating recorder
+            // controls from CopyFromScreen automatically. If that API is unavailable or blocked,
+            // briefly hide only SoplyraAI's own overlay while pixels are copied, then restore it
+            // without activation. The user's target application never loses focus.
+            if (CaptureOverlayRegistry.TryGet(out var overlay, out var excludedByWindows) &&
+                !excludedByWindows &&
+                NativeMethods.IsWindowVisible(overlay))
+            {
+                NativeMethods.ShowWindow(overlay, NativeMethods.SW_HIDE);
+                hiddenOverlay = overlay;
+                System.Threading.Thread.Sleep(45);
+            }
+
+            graphics.CopyFromScreen(bounds.Left, bounds.Top, 0, 0, bounds.Size, CopyPixelOperation.SourceCopy);
+        }
+        finally
+        {
+            if (hiddenOverlay != IntPtr.Zero)
+                NativeMethods.ShowWindow(hiddenOverlay, NativeMethods.SW_SHOWNOACTIVATE);
+        }
     }
 
     private static Rectangle GetForegroundBounds()
