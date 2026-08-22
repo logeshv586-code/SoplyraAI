@@ -56,7 +56,11 @@ public sealed class DescriptionService
             ct);
 
         if (string.IsNullOrWhiteSpace(result))
-            return "Connection test failed. Check the provider, model, API key, network access, or local Ollama service.";
+        {
+            return settings.UseLocalAi
+                ? "The local model is installed but did not answer the test yet. Ollama may still be starting or loading the model into memory; retry Test connection after a few seconds."
+                : "Connection test failed. Check the provider, model, API key, or network access.";
+        }
 
         var vision = AiProviderCatalog.IsVisionModel(settings.AiProvider, settings.AiModel)
             ? " Vision-capable model detected."
@@ -254,7 +258,9 @@ Current draft: {PrivacySanitizer.Clean(step.Description, 1200)}
         };
         return new HttpClient(handler)
         {
-            Timeout = TimeSpan.FromSeconds(15),
+            // Local models can need extra time on their first request while Ollama loads weights
+            // into RAM/VRAM. Keep cloud calls fast while avoiding false local verification failures.
+            Timeout = baseUri.IsLoopback ? TimeSpan.FromSeconds(60) : TimeSpan.FromSeconds(15),
             MaxResponseContentBufferSize = MaxAiResponseBytes
         };
     }
