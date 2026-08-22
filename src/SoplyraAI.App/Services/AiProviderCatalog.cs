@@ -13,6 +13,7 @@ public static class AiProviderCatalog
 {
     public static readonly IReadOnlyList<string> LocalModels = new[]
     {
+        "qwen3:1.7b",
         "qwen3:4b",
         "qwen2.5vl:3b",
         "deepseek-r1:7b",
@@ -22,9 +23,9 @@ public static class AiProviderCatalog
     private static readonly IReadOnlyList<AiProviderOption> Providers = new[]
     {
         new AiProviderOption(
-            "Ollama", "Ollama · Local", "http://127.0.0.1:11434/v1", "qwen3:4b", true,
+            "Ollama", "Ollama · Local", "http://127.0.0.1:11434/v1", "qwen3:1.7b", true,
             LocalModels,
-            "Private local inference. qwen3:4b is recommended for text documentation; qwen2.5vl:3b and gemma3:4b add screenshot vision."),
+            "Private local inference. qwen3:1.7b is the lightweight default; qwen3:4b improves text quality when memory allows; qwen2.5vl:3b and gemma3:4b add screenshot vision."),
         new AiProviderOption(
             "OpenAI", "OpenAI", "https://api.openai.com/v1", "gpt-5.6-luna", true,
             new[] { "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol" },
@@ -32,19 +33,19 @@ public static class AiProviderCatalog
         new AiProviderOption(
             "DeepSeek", "DeepSeek", "https://api.deepseek.com", "deepseek-v4-flash", false,
             new[] { "deepseek-v4-flash", "deepseek-v4-pro" },
-            "Uses DeepSeek's OpenAI-compatible /chat/completions API in non-thinking mode for concise documentation."),
+            "Text documentation only in SoplyraAI. Screenshot vision remains disabled for this provider."),
         new AiProviderOption(
             "NVIDIA", "NVIDIA NIM", "https://integrate.api.nvidia.com/v1", "google/gemma-4-31b-it", true,
             new[] { "google/gemma-4-31b-it", "openai/gpt-oss-20b", "meta/llama-3.3-70b-instruct" },
-            "Uses NVIDIA's OpenAI-compatible /v1/chat/completions endpoint. Gemma 4 supports image input; the model field also accepts other compatible NIM model IDs."),
+            "Uses NVIDIA's OpenAI-compatible /v1/chat/completions endpoint. Vision is enabled only for image-capable model IDs."),
         new AiProviderOption(
             "Gemini", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta", "gemini-3.7-flash", true,
             new[] { "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite" },
-            "Uses Gemini generateContent with current Gemini 3.x request rules. The model field is editable for other supported Gemini model IDs."),
+            "Uses Gemini generateContent. Screenshot vision can be explicitly enabled for supported models."),
         new AiProviderOption(
             "Anthropic", "Anthropic Claude", "https://api.anthropic.com", "claude-sonnet-5", true,
             new[] { "claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5" },
-            "Uses Anthropic's Messages API. Current Claude models accept text and image input; you can also enter another model ID available to your account.")
+            "Uses Anthropic's Messages API. Screenshot vision can be explicitly enabled for supported models.")
     };
 
     public static IReadOnlyList<AiProviderOption> All => Providers;
