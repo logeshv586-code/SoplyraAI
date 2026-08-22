@@ -57,6 +57,11 @@ public partial class MainWindow : Window
         recorder.StepCaptured += (_, step) =>
         {
             var session = _current;
+            step.DocumentationStatus = _settings.EnableAi && _settings.HasCompletedAiSetup
+                ? $"AI processing · {_settings.AiModel}"
+                : "Captured · built-in wording";
+            _sessions.Save(session);
+
             Dispatcher.Invoke(() =>
             {
                 StepsList.ItemsSource = session.Steps;
@@ -70,7 +75,12 @@ public partial class MainWindow : Window
 
     private async Task ImproveCapturedStepAsync(GuideSession session, GuideStep step)
     {
-        if (!_settings.EnableAi || !_settings.HasCompletedAiSetup) return;
+        if (!_settings.EnableAi || !_settings.HasCompletedAiSetup)
+        {
+            step.DocumentationStatus = "Captured · built-in wording";
+            _sessions.Save(session);
+            return;
+        }
 
         var modelOutput = await _describer.ImproveAsync(step, session, _settings);
         var decision = AiDescriptionQualityService.Resolve(step, session, modelOutput, _settings);
@@ -78,6 +88,9 @@ public partial class MainWindow : Window
         await Dispatcher.InvokeAsync(() =>
         {
             step.Description = decision.Text;
+            step.DocumentationStatus = decision.UsedAi
+                ? $"✓ AI enhanced · {_settings.AiModel}"
+                : "✓ Grounded fallback · AI checked";
             if (session.Id == _current.Id) StepsList.Items.Refresh();
             _sessions.Save(session);
         });
@@ -208,11 +221,18 @@ public partial class MainWindow : Window
         {
             foreach (var step in _current.Steps)
             {
+                step.DocumentationStatus = $"AI processing · {_settings.AiModel}";
+                StepsList.Items.Refresh();
+
                 var modelOutput = await _describer.ImproveAsync(step, _current, _settings);
                 var decision = AiDescriptionQualityService.Resolve(step, _current, modelOutput, _settings);
                 step.Description = decision.Text;
+                step.DocumentationStatus = decision.UsedAi
+                    ? $"✓ AI enhanced · {_settings.AiModel}"
+                    : "✓ Grounded fallback · AI checked";
                 if (decision.UsedAi) acceptedAi++;
                 else groundedFallbacks++;
+                StepsList.Items.Refresh();
             }
             _sessions.Save(_current);
             StepsList.Items.Refresh();
@@ -227,7 +247,7 @@ public partial class MainWindow : Window
             $"Description review complete using {_settings.AiProvider}.\n\n" +
             $"Accepted grounded AI descriptions: {acceptedAi}\n" +
             $"Protected by deterministic fallback: {groundedFallbacks}\n\n" +
-            "SoplyraAI keeps the stronger local description whenever a model returns generic, uncertain, or ungrounded wording.",
+            "Each step now shows whether AI wording was accepted or SoplyraAI kept its grounded fallback.",
             "SoplyraAI");
     }
 
