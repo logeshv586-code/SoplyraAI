@@ -18,6 +18,7 @@ internal static class NarrativeSelfTestModule
         VerifyGenericRegionTitle();
         VerifyAiQualityGate();
         VerifyWorkflowExportNaming();
+        VerifyNoModelSettingsPersistence();
     }
 
     private static void VerifyMinimizeNarrative()
@@ -227,6 +228,35 @@ internal static class NarrativeSelfTestModule
                 throw new InvalidOperationException("Workflow title was not used as the exported PDF filename.");
             if (!File.Exists(renamed) || File.Exists(generated))
                 throw new InvalidOperationException("Export file rename did not complete safely.");
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { }
+        }
+    }
+
+    private static void VerifyNoModelSettingsPersistence()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "soplyraai-settings-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var store = new SettingsStore(root);
+            store.Save(new AppSettings
+            {
+                EnableAi = false,
+                UseLocalAi = false,
+                AllowRemoteAi = false,
+                SendScreenshotsToAi = false,
+                HasCompletedAiSetup = true,
+                AiProvider = "Ollama",
+                AiModel = "qwen3:4b",
+                DefaultExportFormat = "PDF"
+            });
+
+            var loaded = store.Load();
+            if (loaded.EnableAi || !loaded.HasCompletedAiSetup || loaded.SendScreenshotsToAi)
+                throw new InvalidOperationException("No-model documentation settings did not persist safely.");
         }
         finally
         {
