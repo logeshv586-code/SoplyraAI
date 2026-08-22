@@ -1,7 +1,7 @@
 <Window x:Class="SoplyraAI.Views.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="SoplyraAI · AI setup" Width="940" Height="840" MinWidth="860" MinHeight="760"
+        Title="SoplyraAI · AI setup" Width="940" Height="870" MinWidth="860" MinHeight="780"
         WindowStartupLocation="CenterOwner" Background="#F7F8FC">
     <Grid Margin="28">
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -56,6 +56,28 @@
                             <TextBlock x:Name="LocalModelStatusText" Text="Checking whether this model is already installed…" Foreground="#596078" TextWrapping="Wrap" FontSize="11"/>
                             <TextBlock Text="qwen3:4b — documentation · qwen2.5vl:3b — vision · deepseek-r1:7b — reasoning · gemma3:4b — multimodal" Foreground="#73778D" TextWrapping="Wrap" FontSize="11" Margin="0,5,0,0"/>
 
+                            <Grid Margin="0,11,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <Border x:Name="ModelStateCard" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="10">
+                                    <StackPanel>
+                                        <TextBlock Text="MODEL FILES" Foreground="#64748B" FontSize="9" FontWeight="Bold"/>
+                                        <TextBlock x:Name="ModelStateText" Text="Checking…" Foreground="#475569" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border x:Name="ServiceStateCard" Grid.Column="2" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="10">
+                                    <StackPanel>
+                                        <TextBlock Text="OLLAMA SERVICE" Foreground="#64748B" FontSize="9" FontWeight="Bold"/>
+                                        <TextBlock x:Name="ServiceStateText" Text="Checking…" Foreground="#475569" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border x:Name="AiStateCard" Grid.Column="4" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="10">
+                                    <StackPanel>
+                                        <TextBlock Text="AI DOCUMENTATION" Foreground="#64748B" FontSize="9" FontWeight="Bold"/>
+                                        <TextBlock x:Name="AiStateText" Text="Not tested" Foreground="#475569" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
                             <Border x:Name="AdvancedModelHintPanel" Visibility="Collapsed" Background="#F8F7FF" BorderBrush="#E5E1FF" BorderThickness="1" CornerRadius="12" Padding="11" Margin="0,10,0,0">
                                 <TextBlock x:Name="AdvancedModelHintText" Foreground="#5546C7" TextWrapping="Wrap" FontSize="11" FontWeight="SemiBold"/>
                             </Border>
@@ -77,7 +99,7 @@
                                 </StackPanel>
                             </Border>
 
-                            <TextBlock Text="Installed models are reused automatically. Downloading another model does not remove the models already on this PC." Foreground="#596078" TextWrapping="Wrap" FontSize="11" Margin="0,10,0,0"/>
+                            <TextBlock Text="When AI documentation is Active, each new captured step keeps its screenshot and UI context, then the selected model rewrites the step. If AI output is weak, SoplyraAI safely keeps the built-in wording." Foreground="#596078" TextWrapping="Wrap" FontSize="11" Margin="0,10,0,0"/>
                         </StackPanel>
                     </Grid>
                 </Border>
