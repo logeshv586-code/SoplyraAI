@@ -30,6 +30,30 @@ internal static partial class AiDescriptionQualityService
         "maybe"
     };
 
+    private static readonly string[] MetaReasoningPhrases =
+    {
+        "we are given",
+        "we're given",
+        "key points from the context",
+        "key points from context",
+        "the instruction says",
+        "the instructions say",
+        "we must write",
+        "we need to write",
+        "we need to answer",
+        "what does this button do",
+        "what this does section",
+        "current grounded draft",
+        "untrusted data",
+        "do not invent information",
+        "return only the documentation"
+    };
+
+    private static readonly string[] PromptFieldLabels =
+    {
+        "Action:", "Element:", "Control type:", "Help text:", "Window:", "Application:"
+    };
+
     private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
     {
         "click", "select", "open", "button", "tab", "menu", "item", "control", "current",
@@ -47,10 +71,23 @@ internal static partial class AiDescriptionQualityService
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(settings);
 
-        var baseline = StepNarrativeService.Build(step, session.DocumentationMode).Purpose;
+        if (step.DescriptionEditedByUser)
+            return new AiDescriptionDecision(step.Description, false, "Manual edit kept as authoritative wording.");
+
+        var baseline = GroundedFallbackDescriptionService.Build(
+            step,
+            StepNarrativeService.Build(step, session.DocumentationMode).Purpose);
         var candidate = NormalizeCandidate(modelOutput);
         if (string.IsNullOrWhiteSpace(candidate))
             return new AiDescriptionDecision(baseline, false, "Model returned no usable description.");
+
+        if (LooksLikePromptEchoOrReasoning(candidate))
+            return new AiDescriptionDecision(baseline, false, "Model returned prompt echo or reasoning instead of documentation prose.");
+
+        var wordCount = WordRegex().Matches(candidate).Count;
+        var maxWords = session.DocumentationMode.Equals("Detailed", StringComparison.OrdinalIgnoreCase) ? 130 : 48;
+        if (wordCount > maxWords)
+            return new AiDescriptionDecision(baseline, false, "Model description exceeded the documentation length limit.");
 
         if (candidate.Length < 28)
             return new AiDescriptionDecision(baseline, false, "Model description was too short to be reliable.");
@@ -118,6 +155,20 @@ internal static partial class AiDescriptionQualityService
             }
         }
 
+        // Some reasoning models expose their scratch text but still put a clean result after a final
+        // marker. Prefer that final segment before applying the quality gate.
+        foreach (var marker in new[] { "Final answer:", "Final:" })
+        {
+            var index = text.LastIndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (index < 0) continue;
+            var finalText = text[(index + marker.Length)..].Trim();
+            if (finalText.Length >= 20)
+            {
+                text = finalText;
+                break;
+            }
+        }
+
         text = HeadingPrefixRegex().Replace(text, "").Trim();
 
         var expectedIndex = text.IndexOf("Expected result:", StringComparison.OrdinalIgnoreCase);
@@ -127,6 +178,19 @@ internal static partial class AiDescriptionQualityService
 
         text = MultiWhitespaceRegex().Replace(text, " ").Trim();
         return text;
+    }
+
+    private static bool LooksLikePromptEchoOrReasoning(string candidate)
+    {
+        if (MetaReasoningPhrases.Any(phrase => candidate.Contains(phrase, StringComparison.OrdinalIgnoreCase)))
+            return true;
+
+        var promptLabels = PromptFieldLabels.Count(label =>
+            candidate.Contains(label, StringComparison.OrdinalIgnoreCase));
+        if (promptLabels >= 2) return true;
+
+        return candidate.StartsWith("Given ", StringComparison.OrdinalIgnoreCase) &&
+               candidate.Contains("context", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool ContainsGroundingAnchor(GuideStep step, string candidate)

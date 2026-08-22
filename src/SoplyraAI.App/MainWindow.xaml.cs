@@ -82,16 +82,33 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Capture the exact editor state before the asynchronous model request. A user can begin
+        // editing or remove this step while the model is still running; that later user action must
+        // always win instead of being overwritten when the AI response arrives.
+        var descriptionBeforeAi = step.Description;
+        var titleBeforeAi = step.Title;
         var modelOutput = await _describer.ImproveAsync(step, session, _settings);
         var decision = AiDescriptionQualityService.Resolve(step, session, modelOutput, _settings);
 
         await Dispatcher.InvokeAsync(() =>
         {
+            if (!session.Steps.Any(existing => existing.Id == step.Id))
+                return;
+
+            var userChangedStep = step.DescriptionEditedByUser || step.TitleEditedByUser ||
+                                  !string.Equals(step.Description, descriptionBeforeAi, StringComparison.Ordinal) ||
+                                  !string.Equals(step.Title, titleBeforeAi, StringComparison.Ordinal);
+            if (userChangedStep)
+            {
+                step.DocumentationStatus = "✓ Manual edit kept";
+                _sessions.Save(session);
+                return;
+            }
+
             step.Description = decision.Text;
             step.DocumentationStatus = decision.UsedAi
                 ? $"✓ AI enhanced · {_settings.AiModel}"
                 : "✓ Grounded fallback · AI checked";
-            if (session.Id == _current.Id) StepsList.Items.Refresh();
             _sessions.Save(session);
         });
     }
@@ -217,14 +234,39 @@ public partial class MainWindow : Window
         ImproveButton.Content = "Improving…";
         var acceptedAi = 0;
         var groundedFallbacks = 0;
+        var manualEditsKept = 0;
         try
         {
-            foreach (var step in _current.Steps)
+            // Iterate over a snapshot because Remove remains available while model calls are in flight.
+            foreach (var step in _current.Steps.ToList())
             {
+                if (!_current.Steps.Any(existing => existing.Id == step.Id))
+                    continue;
+
+                if (step.DescriptionEditedByUser || step.TitleEditedByUser)
+                {
+                    step.DocumentationStatus = "✓ Manual edit kept";
+                    manualEditsKept++;
+                    continue;
+                }
+
+                var descriptionBeforeAi = step.Description;
+                var titleBeforeAi = step.Title;
                 step.DocumentationStatus = $"AI processing · {_settings.AiModel}";
-                StepsList.Items.Refresh();
 
                 var modelOutput = await _describer.ImproveAsync(step, _current, _settings);
+                if (!_current.Steps.Any(existing => existing.Id == step.Id))
+                    continue;
+
+                if (step.DescriptionEditedByUser || step.TitleEditedByUser ||
+                    !string.Equals(step.Description, descriptionBeforeAi, StringComparison.Ordinal) ||
+                    !string.Equals(step.Title, titleBeforeAi, StringComparison.Ordinal))
+                {
+                    step.DocumentationStatus = "✓ Manual edit kept";
+                    manualEditsKept++;
+                    continue;
+                }
+
                 var decision = AiDescriptionQualityService.Resolve(step, _current, modelOutput, _settings);
                 step.Description = decision.Text;
                 step.DocumentationStatus = decision.UsedAi
@@ -232,10 +274,8 @@ public partial class MainWindow : Window
                     : "✓ Grounded fallback · AI checked";
                 if (decision.UsedAi) acceptedAi++;
                 else groundedFallbacks++;
-                StepsList.Items.Refresh();
             }
             _sessions.Save(_current);
-            StepsList.Items.Refresh();
         }
         finally
         {
@@ -246,8 +286,9 @@ public partial class MainWindow : Window
         MessageBox.Show(
             $"Description review complete using {_settings.AiProvider}.\n\n" +
             $"Accepted grounded AI descriptions: {acceptedAi}\n" +
-            $"Protected by deterministic fallback: {groundedFallbacks}\n\n" +
-            "Each step now shows whether AI wording was accepted or SoplyraAI kept its grounded fallback.",
+            $"Protected by deterministic fallback: {groundedFallbacks}\n" +
+            $"Manual edits kept unchanged: {manualEditsKept}\n\n" +
+            "Each step now keeps user edits authoritative while weak or ungrounded AI output is rejected.",
             "SoplyraAI");
     }
 
@@ -395,9 +436,9 @@ public partial class MainWindow : Window
                 return;
             }
 
-            StepsList.ItemsSource = null;
-            StepsList.ItemsSource = _current.Steps;
-            StepsList.Items.Refresh();
+            // _current.Steps is an ObservableCollection, so DeleteStep already updates the card list.
+            // Do not tear down/rebind ItemsSource here; doing so destroys focused editors and was the
+            // main reason Remove/edit clicks could feel intermittent while AI updates were arriving.
             SetHasSteps(_current.Steps.Count > 0);
             _captureBar?.SetStepCount(_current.Steps.Count);
             RefreshSessions(selectCurrent: true);
