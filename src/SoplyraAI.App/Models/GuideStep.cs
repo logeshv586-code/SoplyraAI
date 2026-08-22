@@ -8,6 +8,7 @@ public sealed class GuideStep : INotifyPropertyChanged
 {
     private string _title = "";
     private string _description = "";
+    private string _documentationStatus = "Captured · built-in wording";
 
     public Guid Id { get; set; } = Guid.NewGuid();
     public int Number { get; set; }
@@ -31,6 +32,12 @@ public sealed class GuideStep : INotifyPropertyChanged
     {
         get => StepNarrativeService.NormalizeStoredDescription(Action, Context, _title, _description);
         set { _description = value ?? ""; OnPropertyChanged(); }
+    }
+
+    public string DocumentationStatus
+    {
+        get => string.IsNullOrWhiteSpace(_documentationStatus) ? "Captured · built-in wording" : _documentationStatus;
+        set { _documentationStatus = value ?? ""; OnPropertyChanged(); }
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
