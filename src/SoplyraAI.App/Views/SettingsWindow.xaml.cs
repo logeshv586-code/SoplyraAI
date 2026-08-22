@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using SoplyraAI.Models;
 using SoplyraAI.Services;
 
@@ -85,6 +86,9 @@ public partial class SettingsWindow : Window
         SetupButton.Content = "Download & use model";
         LocalModelStatusText.Text = $"Checking whether {model} is already installed…";
         AdvancedModelHintPanel.Visibility = Visibility.Collapsed;
+        SetStateCard(ModelStateCard, ModelStateText, "Checking…", StateKind.Neutral);
+        SetStateCard(ServiceStateCard, ServiceStateText, "Checking…", StateKind.Neutral);
+        SetAiState("Not tested", StateKind.Neutral);
 
         LocalModelStatus status;
         try
@@ -101,12 +105,52 @@ public partial class SettingsWindow : Window
         LocalModelStatusText.Text = status.Message;
         _selectedLocalModelInstalled = status.ModelInstalled;
         SetupButton.Content = status.ModelInstalled ? "Use installed model" : "Download & use model";
+        UpdateLocalStateCards(status);
 
         if (status.ModelInstalled)
         {
             AdvancedModelHintText.Text = BuildAdvancedModelHint(model, status.InstalledModels);
             AdvancedModelHintPanel.Visibility = Visibility.Visible;
         }
+    }
+
+    private void UpdateLocalStateCards(LocalModelStatus status)
+    {
+        SetStateCard(
+            ModelStateCard,
+            ModelStateText,
+            status.ModelInstalled ? "✓ Installed" : "Not installed",
+            status.ModelInstalled ? StateKind.Good : StateKind.Warning);
+
+        var serviceText = status.ServiceReady
+            ? "✓ Ollama running"
+            : status.OllamaInstalled
+                ? "Needs startup"
+                : "Not installed";
+        SetStateCard(
+            ServiceStateCard,
+            ServiceStateText,
+            serviceText,
+            status.ServiceReady ? StateKind.Good : StateKind.Warning);
+    }
+
+    private void SetAiState(string text, StateKind kind) =>
+        SetStateCard(AiStateCard, AiStateText, text, kind);
+
+    private static void SetStateCard(Border card, TextBlock textBlock, string text, StateKind kind)
+    {
+        var (background, border, foreground) = kind switch
+        {
+            StateKind.Good => (Color.FromRgb(236, 253, 245), Color.FromRgb(167, 243, 208), Color.FromRgb(4, 120, 87)),
+            StateKind.Warning => (Color.FromRgb(255, 251, 235), Color.FromRgb(253, 230, 138), Color.FromRgb(180, 83, 9)),
+            StateKind.Bad => (Color.FromRgb(254, 242, 242), Color.FromRgb(254, 202, 202), Color.FromRgb(185, 28, 28)),
+            _ => (Color.FromRgb(248, 250, 252), Color.FromRgb(226, 232, 240), Color.FromRgb(71, 85, 105))
+        };
+
+        card.Background = new SolidColorBrush(background);
+        card.BorderBrush = new SolidColorBrush(border);
+        textBlock.Foreground = new SolidColorBrush(foreground);
+        textBlock.Text = text;
     }
 
     private static string BuildAdvancedModelHint(string selectedModel, IReadOnlyList<string> installedModels)
@@ -160,6 +204,7 @@ public partial class SettingsWindow : Window
         var model = LocalModelBox.SelectedItem?.ToString() ?? AiProviderCatalog.Get("Ollama").DefaultModel;
         var wasInstalled = _selectedLocalModelInstalled;
         SetLocalSetupBusy(true);
+        SetAiState("Preparing…", StateKind.Neutral);
         ShowSetupProgress(
             phase: wasInstalled ? $"Preparing installed model · {model}" : $"Preparing {model}",
             percent: wasInstalled ? 100 : null,
@@ -174,6 +219,7 @@ public partial class SettingsWindow : Window
 
         if (!result.StartsWith("Local AI is ready:", StringComparison.OrdinalIgnoreCase))
         {
+            SetAiState("Not active", StateKind.Bad);
             ShowSetupProgress(
                 phase: "Local model could not be prepared",
                 percent: null,
@@ -213,6 +259,7 @@ public partial class SettingsWindow : Window
         {
             _selectedLocalModelInstalled = true;
             SetupButton.Content = "Use installed model";
+            SetAiState("Connection retry", StateKind.Warning);
             ShowSetupProgress(
                 phase: "Model installed · connection needs retry",
                 percent: 100,
@@ -221,21 +268,21 @@ public partial class SettingsWindow : Window
             SetupStatus.Text = $"{model} is installed locally. {connection} No redownload is required.";
             SetLocalSetupBusy(false);
             await RefreshLocalModelStatusAsync();
+            SetAiState("Connection retry", StateKind.Warning);
             return;
         }
 
-        ApplyCandidate(candidate);
         _selectedLocalModelInstalled = true;
+        SetStateCard(ModelStateCard, ModelStateText, "✓ Installed", StateKind.Good);
+        SetStateCard(ServiceStateCard, ServiceStateText, "✓ Ollama running", StateKind.Good);
+        SetAiState("✓ Active", StateKind.Good);
         ShowSetupProgress(
             phase: alreadyInstalled ? "Installed model ready to use" : "Model ready to use",
             percent: 100,
-            detail: $"{connection} SoplyraAI will use {model} for new captured steps.",
+            detail: $"{connection} SoplyraAI can now use {model} for new captured steps.",
             indeterminate: false);
-        SetupStatus.Text = $"{connection} The local model is active for new captures.";
-
-        await Task.Delay(900);
+        SetupStatus.Text = $"AI documentation active with {model}. New captures keep screenshots and UI context, then SoplyraAI uses this model to improve step wording. Click Save & continue to make this the selected engine.";
         SetLocalSetupBusy(false);
-        DialogResult = true;
     }
 
     private void UpdateSetupProgressFromLog(string model, string line)
@@ -251,6 +298,7 @@ public partial class SettingsWindow : Window
             phase = "Model already installed";
             percent = 100;
             _selectedLocalModelInstalled = true;
+            SetStateCard(ModelStateCard, ModelStateText, "✓ Installed", StateKind.Good);
         }
         else if (clean.Contains("starting ollama", StringComparison.OrdinalIgnoreCase))
             phase = "Starting Ollama local service";
@@ -338,26 +386,45 @@ public partial class SettingsWindow : Window
             LocalModelStatusText.Text = status.Message;
             _selectedLocalModelInstalled = status.ModelInstalled;
             SetupButton.Content = status.ModelInstalled ? "Use installed model" : "Download & use model";
+            UpdateLocalStateCards(status);
 
             if (!status.OllamaInstalled)
             {
+                SetAiState("Cannot test", StateKind.Bad);
                 SetupStatus.Text = "Ollama is not installed yet. Use Download & use model first.";
                 return;
             }
             if (!status.ServiceReady)
             {
+                SetAiState("Service offline", StateKind.Warning);
                 SetupStatus.Text = "Ollama is installed but its local service is not ready. Reopen SoplyraAI or use the model button to retry startup.";
                 return;
             }
             if (!status.ModelInstalled)
             {
+                SetAiState("Model missing", StateKind.Warning);
                 SetupStatus.Text = $"{candidate.AiModel} is not installed yet. Download it before testing the model.";
                 return;
             }
         }
 
-        SetupStatus.Text = "Testing AI connection…";
-        SetupStatus.Text = await _describer.TestConnectionAsync(candidate);
+        SetAiState("Testing…", StateKind.Neutral);
+        SetupStatus.Text = "Testing AI connection and model generation…";
+        var connection = await _describer.TestConnectionAsync(candidate);
+        SetupStatus.Text = connection;
+
+        if (connection.StartsWith("Connected to ", StringComparison.OrdinalIgnoreCase))
+        {
+            SetAiState("✓ Active", StateKind.Good);
+            if (candidate.UseLocalAi)
+            {
+                SetupStatus.Text = $"{connection} AI documentation is active. When you start capture, every recorded step keeps its screenshot and UI context, then {candidate.AiModel} is asked to improve the documentation wording. Weak AI output is automatically replaced by SoplyraAI's grounded fallback.";
+            }
+        }
+        else
+        {
+            SetAiState("Test failed", StateKind.Bad);
+        }
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
@@ -467,5 +534,13 @@ public partial class SettingsWindow : Window
     {
         if (_firstRun && !_settings.HasCompletedAiSetup) _settings.HasCompletedAiSetup = false;
         DialogResult = false;
+    }
+
+    private enum StateKind
+    {
+        Neutral,
+        Good,
+        Warning,
+        Bad
     }
 }
