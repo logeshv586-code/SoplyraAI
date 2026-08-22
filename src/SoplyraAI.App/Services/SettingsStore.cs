@@ -36,9 +36,10 @@ public sealed class SettingsStore
 
             var settings = new AppSettings
             {
-                UseLocalAi = AiProviderCatalog.IsLocal(provider),
-                AllowRemoteAi = !AiProviderCatalog.IsLocal(provider) && stored.AllowRemoteAi,
-                SendScreenshotsToAi = stored.SendScreenshotsToAi,
+                EnableAi = stored.EnableAi,
+                UseLocalAi = stored.EnableAi && AiProviderCatalog.IsLocal(provider),
+                AllowRemoteAi = stored.EnableAi && !AiProviderCatalog.IsLocal(provider) && stored.AllowRemoteAi,
+                SendScreenshotsToAi = stored.EnableAi && stored.SendScreenshotsToAi,
                 HasCompletedAiSetup = stored.HasCompletedAiSetup,
                 AiProvider = option.Id,
                 AiEndpoint = string.IsNullOrWhiteSpace(stored.AiEndpoint) ? option.Endpoint : PrivacySanitizer.Clean(stored.AiEndpoint, 2048),
@@ -72,11 +73,13 @@ public sealed class SettingsStore
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         var provider = AiProviderCatalog.Get(settings.AiProvider);
+        var local = AiProviderCatalog.IsLocal(provider.Id);
         var stored = new PersistedSettings
         {
-            UseLocalAi = AiProviderCatalog.IsLocal(provider.Id),
-            AllowRemoteAi = !AiProviderCatalog.IsLocal(provider.Id),
-            SendScreenshotsToAi = settings.SendScreenshotsToAi,
+            EnableAi = settings.EnableAi,
+            UseLocalAi = settings.EnableAi && local,
+            AllowRemoteAi = settings.EnableAi && !local && settings.AllowRemoteAi,
+            SendScreenshotsToAi = settings.EnableAi && settings.SendScreenshotsToAi,
             HasCompletedAiSetup = settings.HasCompletedAiSetup,
             AiProvider = provider.Id,
             AiEndpoint = provider.Endpoint,
@@ -132,6 +135,7 @@ public sealed class SettingsStore
 
     private sealed class PersistedSettings
     {
+        public bool EnableAi { get; set; } = true;
         public bool UseLocalAi { get; set; } = true;
         public bool AllowRemoteAi { get; set; }
         public bool SendScreenshotsToAi { get; set; }
