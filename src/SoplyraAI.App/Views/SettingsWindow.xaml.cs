@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using SoplyraAI.Models;
@@ -7,6 +8,10 @@ namespace SoplyraAI.Views;
 
 public partial class SettingsWindow : Window
 {
+    private static readonly Regex PercentPattern = new(
+        @"(?<!\d)(?<percent>\d{1,3})\s*%",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     private readonly AppSettings _settings;
     private readonly LocalAiSetupService _setup;
     private readonly DescriptionService _describer = new();
@@ -38,7 +43,10 @@ public partial class SettingsWindow : Window
         ApplyEngineMode();
     }
 
-    private void EngineMode_Changed(object sender, RoutedEventArgs e) { if (IsLoaded) ApplyEngineMode(); }
+    private void EngineMode_Changed(object sender, RoutedEventArgs e)
+    {
+        if (IsLoaded) ApplyEngineMode();
+    }
 
     private void ApplyEngineMode()
     {
@@ -48,10 +56,14 @@ public partial class SettingsWindow : Window
         LocalPanel.Visibility = local ? Visibility.Visible : Visibility.Collapsed;
         CloudPanel.Visibility = cloud ? Visibility.Visible : Visibility.Collapsed;
         BuiltInPanel.Visibility = noAi ? Visibility.Visible : Visibility.Collapsed;
+        if (!local) SetupProgressPanel.Visibility = Visibility.Collapsed;
         if (cloud) RefreshCloudProvider();
     }
 
-    private void ProviderBox_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (IsLoaded) RefreshCloudProvider(); }
+    private void ProviderBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (IsLoaded) RefreshCloudProvider();
+    }
 
     private void RefreshCloudProvider()
     {
@@ -59,7 +71,8 @@ public partial class SettingsWindow : Window
         var index = Math.Clamp(ProviderBox.SelectedIndex, 0, options.Count - 1);
         var provider = options[index];
         ModelBox.ItemsSource = provider.Models;
-        if (string.IsNullOrWhiteSpace(ModelBox.Text) || !provider.Models.Contains(ModelBox.Text)) ModelBox.Text = provider.DefaultModel;
+        if (string.IsNullOrWhiteSpace(ModelBox.Text) || !provider.Models.Contains(ModelBox.Text))
+            ModelBox.Text = provider.DefaultModel;
         ProviderNote.Text = provider.Note;
         VisionCheck.IsEnabled = provider.SupportsVision;
         if (!provider.SupportsVision) VisionCheck.IsChecked = false;
@@ -67,20 +80,35 @@ public partial class SettingsWindow : Window
 
     private async void SetupButton_Click(object sender, RoutedEventArgs e)
     {
-        SetupButton.IsEnabled = false;
-        SetupStatus.Text = "Preparing local AI…";
         var model = LocalModelBox.SelectedItem?.ToString() ?? AiProviderCatalog.Get("Ollama").DefaultModel;
-        var result = await _setup.SetupAsync(model, line => Dispatcher.Invoke(() => SetupStatus.Text = line));
+        SetLocalSetupBusy(true);
+        ShowSetupProgress(
+            phase: $"Preparing {model}",
+            percent: null,
+            detail: "Checking Ollama and local model requirements…");
+
+        var result = await _setup.SetupAsync(
+            model,
+            line => Dispatcher.BeginInvoke(new Action(() => UpdateSetupProgressFromLog(model, line))));
 
         if (!result.StartsWith("Local AI is ready:", StringComparison.OrdinalIgnoreCase))
         {
+            ShowSetupProgress(
+                phase: "Download could not be completed",
+                percent: null,
+                detail: result,
+                indeterminate: false);
             SetupStatus.Text = result;
-            SetupButton.IsEnabled = true;
+            SetLocalSetupBusy(false);
             return;
         }
 
         var candidate = BuildCandidate();
-        SetupStatus.Text = $"{result}. Verifying the model before capture…";
+        ShowSetupProgress(
+            phase: "Verifying downloaded model",
+            percent: null,
+            detail: $"{model} is downloaded. SoplyraAI is checking the local AI connection…");
+
         var connection = await _describer.TestConnectionAsync(candidate);
         if (!connection.StartsWith("Connected to ", StringComparison.OrdinalIgnoreCase))
         {
@@ -90,15 +118,100 @@ public partial class SettingsWindow : Window
 
         if (!connection.StartsWith("Connected to ", StringComparison.OrdinalIgnoreCase))
         {
-            SetupStatus.Text = $"{result}\n{connection}\nThe model is downloaded, but SoplyraAI could not verify it yet. Use Test connection or restart Ollama and retry.";
-            SetupButton.IsEnabled = true;
+            ShowSetupProgress(
+                phase: "Model downloaded · verification pending",
+                percent: 100,
+                detail: $"{connection} Restart Ollama or use Test connection, then retry.",
+                indeterminate: false);
+            SetupStatus.Text = $"{result}\n{connection}\nThe model is downloaded, but SoplyraAI could not verify it yet.";
+            SetLocalSetupBusy(false);
             return;
         }
 
         ApplyCandidate(candidate);
+        ShowSetupProgress(
+            phase: "Model ready to use",
+            percent: 100,
+            detail: $"{connection} SoplyraAI will use this model for new captured steps.",
+            indeterminate: false);
         SetupStatus.Text = $"{connection} The downloaded model is active for new captures.";
-        SetupButton.IsEnabled = true;
+
+        await Task.Delay(700);
+        SetLocalSetupBusy(false);
         DialogResult = true;
+    }
+
+    private void UpdateSetupProgressFromLog(string model, string line)
+    {
+        var clean = PrivacySanitizer.Clean(line, 500).Trim();
+        if (string.IsNullOrWhiteSpace(clean)) return;
+
+        var percent = ParsePercent(clean);
+        var phase = $"Downloading {model}";
+
+        if (clean.Contains("install", StringComparison.OrdinalIgnoreCase))
+            phase = "Installing Ollama";
+        else if (clean.Contains("manifest", StringComparison.OrdinalIgnoreCase))
+            phase = $"Preparing {model}";
+        else if (clean.Contains("verify", StringComparison.OrdinalIgnoreCase))
+            phase = "Verifying model files";
+        else if (clean.Contains("success", StringComparison.OrdinalIgnoreCase))
+            phase = "Finalizing local model";
+
+        ShowSetupProgress(
+            phase,
+            percent,
+            CleanProgressDetail(clean),
+            indeterminate: percent is null);
+    }
+
+    private static int? ParsePercent(string text)
+    {
+        var match = PercentPattern.Match(text);
+        if (!match.Success || !int.TryParse(match.Groups["percent"].Value, out var value))
+            return null;
+        return Math.Clamp(value, 0, 100);
+    }
+
+    private static string CleanProgressDetail(string text)
+    {
+        var cleaned = text.Replace("\r", " ").Replace("\n", " ").Trim();
+        while (cleaned.Contains("  ", StringComparison.Ordinal))
+            cleaned = cleaned.Replace("  ", " ", StringComparison.Ordinal);
+        return cleaned.Length <= 220 ? cleaned : cleaned[..217] + "…";
+    }
+
+    private void ShowSetupProgress(
+        string phase,
+        int? percent,
+        string detail,
+        bool? indeterminate = null)
+    {
+        SetupProgressPanel.Visibility = Visibility.Visible;
+        SetupPhaseText.Text = phase;
+        SetupDetailText.Text = detail;
+
+        var useIndeterminate = indeterminate ?? percent is null;
+        SetupProgressBar.IsIndeterminate = useIndeterminate;
+
+        if (percent.HasValue)
+        {
+            SetupProgressBar.Value = percent.Value;
+            SetupProgressPercent.Text = $"{percent.Value}%";
+        }
+        else
+        {
+            SetupProgressBar.Value = 0;
+            SetupProgressPercent.Text = useIndeterminate ? "Working…" : "";
+        }
+    }
+
+    private void SetLocalSetupBusy(bool busy)
+    {
+        SetupButton.IsEnabled = !busy;
+        TestConnectionButton.IsEnabled = !busy;
+        LocalModelBox.IsEnabled = !busy;
+        SetupButton.Content = busy ? "Downloading…" : "Download & use model";
     }
 
     private async void TestButton_Click(object sender, RoutedEventArgs e)
