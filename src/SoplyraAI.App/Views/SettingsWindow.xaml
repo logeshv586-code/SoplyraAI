@@ -1,7 +1,7 @@
 <Window x:Class="SoplyraAI.Views.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="SoplyraAI · AI setup" Width="900" Height="760" MinWidth="820" MinHeight="700"
+        Title="SoplyraAI · AI setup" Width="940" Height="800" MinWidth="860" MinHeight="720"
         WindowStartupLocation="CenterOwner" Background="#F7F8FC">
     <Grid Margin="28">
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -12,23 +12,32 @@
                 <TextBlock Text="S" Foreground="White" FontSize="23" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                <TextBlock x:Name="HeaderTitle" Text="Choose your AI engine" FontSize="27" FontWeight="SemiBold" Foreground="#171824"/>
-                <TextBlock Text="Use a private local model or connect your own cloud API key. You stay in control of what leaves this PC." Foreground="#73778D" Margin="0,5,0,0"/>
+                <TextBlock x:Name="HeaderTitle" Text="Choose how SoplyraAI writes steps" FontSize="27" FontWeight="SemiBold" Foreground="#171824"/>
+                <TextBlock Text="Use a private local model, connect your own cloud API key, or use built-in wording with no model at all." Foreground="#73778D" Margin="0,5,0,0" TextWrapping="Wrap"/>
             </StackPanel>
         </Grid>
 
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="0,22,0,18">
             <StackPanel>
                 <Grid>
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
                     <Border Background="White" BorderBrush="#DCDFF0" BorderThickness="1" CornerRadius="16" Padding="17">
                         <RadioButton x:Name="LocalRadio" GroupName="Engine" Checked="EngineMode_Changed" IsChecked="True">
-                            <StackPanel><TextBlock Text="Local · Ollama" FontWeight="SemiBold" FontSize="16"/><TextBlock Text="Private, fast, no API key" Foreground="#74788D" FontSize="11" Margin="0,3,0,0"/></StackPanel>
+                            <StackPanel><TextBlock Text="Local · Ollama" FontWeight="SemiBold" FontSize="16"/><TextBlock Text="Private model on this PC" Foreground="#74788D" FontSize="11" Margin="0,3,0,0"/></StackPanel>
                         </RadioButton>
                     </Border>
                     <Border Grid.Column="2" Background="White" BorderBrush="#DCDFF0" BorderThickness="1" CornerRadius="16" Padding="17">
                         <RadioButton x:Name="CloudRadio" GroupName="Engine" Checked="EngineMode_Changed">
-                            <StackPanel><TextBlock Text="Cloud API" FontWeight="SemiBold" FontSize="16"/><TextBlock Text="DeepSeek · OpenAI · NVIDIA · Gemini · Anthropic" Foreground="#74788D" FontSize="11" Margin="0,3,0,0"/></StackPanel>
+                            <StackPanel><TextBlock Text="Cloud API" FontWeight="SemiBold" FontSize="16"/><TextBlock Text="DeepSeek · OpenAI · NVIDIA · Gemini · Anthropic" Foreground="#74788D" FontSize="11" Margin="0,3,0,0" TextWrapping="Wrap"/></StackPanel>
+                        </RadioButton>
+                    </Border>
+                    <Border Grid.Column="4" Background="White" BorderBrush="#DCDFF0" BorderThickness="1" CornerRadius="16" Padding="17">
+                        <RadioButton x:Name="NoAiRadio" GroupName="Engine" Checked="EngineMode_Changed">
+                            <StackPanel><TextBlock Text="No AI model" FontWeight="SemiBold" FontSize="16"/><TextBlock Text="Built-in wording · fully offline" Foreground="#74788D" FontSize="11" Margin="0,3,0,0"/></StackPanel>
                         </RadioButton>
                     </Border>
                 </Grid>
@@ -46,9 +55,10 @@
                             <ComboBox x:Name="LocalModelBox" Margin="0,7,0,10"/>
                             <TextBlock Text="qwen3:4b — documentation · qwen2.5vl:3b — vision · deepseek-r1:7b — reasoning · gemma3:4b — multimodal" Foreground="#73778D" TextWrapping="Wrap" FontSize="11"/>
                             <StackPanel Orientation="Horizontal" Margin="0,15,0,0">
-                                <Button x:Name="SetupButton" Content="Install / download model" Style="{StaticResource PrimaryButton}" Click="SetupButton_Click"/>
+                                <Button x:Name="SetupButton" Content="Download &amp; use model" Style="{StaticResource PrimaryButton}" Click="SetupButton_Click"/>
                                 <Button Content="Test connection" Style="{StaticResource GhostButton}" Click="TestButton_Click"/>
                             </StackPanel>
+                            <TextBlock Text="After download, SoplyraAI verifies the local model and activates it automatically for new captured steps." Foreground="#596078" TextWrapping="Wrap" FontSize="11" Margin="0,10,0,0"/>
                         </StackPanel>
                     </Grid>
                 </Border>
@@ -71,6 +81,13 @@
                             <Button Content="Test API connection" Style="{StaticResource GhostButton}" HorizontalAlignment="Left" Click="TestButton_Click"/>
                         </StackPanel>
                     </Grid>
+                </Border>
+
+                <Border x:Name="BuiltInPanel" Visibility="Collapsed" Background="#F2F9F6" BorderBrush="#D7ECE4" BorderThickness="1" CornerRadius="18" Padding="22" Margin="0,16,0,0">
+                    <StackPanel>
+                        <TextBlock Text="Built-in wording · no model required" FontSize="18" FontWeight="SemiBold" Foreground="#137B59"/>
+                        <TextBlock Text="SoplyraAI still captures each click, screenshot, application/window context and control metadata. It creates clear deterministic step wording locally, then PDF, Word, HTML and Markdown export continue to work normally." Foreground="#53766A" TextWrapping="Wrap" Margin="0,7,0,0"/>
+                    </StackPanel>
                 </Border>
 
                 <Border Background="#F2F9F6" BorderBrush="#D7ECE4" BorderThickness="1" CornerRadius="14" Padding="15" Margin="0,16,0,0">

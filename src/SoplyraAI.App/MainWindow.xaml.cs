@@ -70,7 +70,7 @@ public partial class MainWindow : Window
 
     private async Task ImproveCapturedStepAsync(GuideSession session, GuideStep step)
     {
-        if (!_settings.HasCompletedAiSetup) return;
+        if (!_settings.EnableAi || !_settings.HasCompletedAiSetup) return;
 
         var modelOutput = await _describer.ImproveAsync(step, session, _settings);
         var decision = AiDescriptionQualityService.Resolve(step, session, modelOutput, _settings);
@@ -106,6 +106,14 @@ public partial class MainWindow : Window
 
     private void UpdateEngineSummary()
     {
+        if (!_settings.EnableAi)
+        {
+            EngineNameText.Text = "Built-in wording";
+            EngineModelText.Text = "No model required";
+            EngineVisionText.Text = "Offline · screenshots + UI metadata";
+            return;
+        }
+
         var provider = AiProviderCatalog.Get(_settings.AiProvider);
         EngineNameText.Text = provider.DisplayName;
         EngineModelText.Text = _settings.AiModel;
@@ -179,10 +187,17 @@ public partial class MainWindow : Window
             MessageBox.Show("Capture at least one step first.", "SoplyraAI");
             return;
         }
+        if (!_settings.EnableAi)
+        {
+            MessageBox.Show(
+                "AI is disabled. Your captured steps already use SoplyraAI's built-in offline wording, so PDF/Word/HTML export can be used immediately. Enable a local or cloud model in Settings only when you want AI rewriting.",
+                "SoplyraAI");
+            return;
+        }
         if (!_settings.HasCompletedAiSetup)
         {
             OpenSettings(firstRun: true);
-            if (!_settings.HasCompletedAiSetup) return;
+            if (!_settings.HasCompletedAiSetup || !_settings.EnableAi) return;
         }
 
         ImproveButton.IsEnabled = false;

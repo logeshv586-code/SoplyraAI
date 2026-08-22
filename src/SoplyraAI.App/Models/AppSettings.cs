@@ -4,6 +4,7 @@ namespace SoplyraAI.Models;
 
 public sealed class AppSettings
 {
+    public bool EnableAi { get; set; } = true;
     public bool UseLocalAi { get; set; } = true;
     public bool AllowRemoteAi { get; set; }
     public bool SendScreenshotsToAi { get; set; }
