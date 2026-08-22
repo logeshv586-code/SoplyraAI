@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Security.Principal;
+using System.Text;
 
 namespace SoplyraAI.Services;
 
@@ -87,16 +88,23 @@ public sealed class LocalAiSetupService
 
             using var process = Process.Start(psi);
             if (process is null) return -1;
-            process.OutputDataReceived += (_, e) => { if (e.Data is not null) log?.Invoke(PrivacySanitizer.Clean(e.Data, 500)); };
-            process.ErrorDataReceived += (_, e) => { if (e.Data is not null) log?.Invoke(PrivacySanitizer.Clean(e.Data, 500)); };
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
+
+            // Ollama refreshes pull progress with carriage returns rather than normal lines.
+            // Pump both streams character-by-character so the UI receives live percentage updates.
+            var outputTask = PumpProgressAsync(process.StandardOutput, log);
+            var errorTask = PumpProgressAsync(process.StandardError, log);
 
             using var cts = new CancellationTokenSource(timeout);
-            try { await process.WaitForExitAsync(cts.Token); return process.ExitCode; }
+            try
+            {
+                await process.WaitForExitAsync(cts.Token);
+                await Task.WhenAll(outputTask, errorTask);
+                return process.ExitCode;
+            }
             catch (OperationCanceledException)
             {
                 try { process.Kill(entireProcessTree: true); } catch { }
+                try { await Task.WhenAll(outputTask, errorTask); } catch { }
                 log?.Invoke("The helper process exceeded its allowed time and was stopped.");
                 return -1;
             }
@@ -106,6 +114,40 @@ public sealed class LocalAiSetupService
             log?.Invoke(PrivacySanitizer.Clean(ex.Message, 500));
             return -1;
         }
+    }
+
+    private static async Task PumpProgressAsync(StreamReader reader, Action<string>? log)
+    {
+        var buffer = new char[256];
+        var current = new StringBuilder(512);
+
+        void Flush()
+        {
+            if (current.Length == 0) return;
+            var text = PrivacySanitizer.Clean(current.ToString(), 500).Trim();
+            current.Clear();
+            if (!string.IsNullOrWhiteSpace(text)) log?.Invoke(text);
+        }
+
+        while (true)
+        {
+            var read = await reader.ReadAsync(buffer.AsMemory(0, buffer.Length));
+            if (read == 0) break;
+
+            for (var i = 0; i < read; i++)
+            {
+                var ch = buffer[i];
+                if (ch is '\r' or '\n')
+                {
+                    Flush();
+                    continue;
+                }
+
+                if (current.Length < 1000) current.Append(ch);
+            }
+        }
+
+        Flush();
     }
 
     private static bool IsElevated()
