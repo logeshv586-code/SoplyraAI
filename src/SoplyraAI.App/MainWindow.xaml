@@ -213,8 +213,8 @@
                                 </Border>
                                 <Border Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="12">
                                     <StackPanel>
-                                        <TextBlock Text="3 · Classic Light-Theme Output" FontWeight="SemiBold" FontSize="12" Foreground="#0F172A"/>
-                                        <TextBlock Text="Exports clean PDF and Word documents ready for distribution." Foreground="#64748B" FontSize="11" Margin="0,3,0,0"/>
+                                        <TextBlock Text="3 · AI Documentation + Export" FontWeight="SemiBold" FontSize="12" Foreground="#0F172A"/>
+                                        <TextBlock Text="Shows whether each step was AI enhanced, then exports premium PDF and Word guides." Foreground="#64748B" FontSize="11" Margin="0,3,0,0" TextWrapping="Wrap"/>
                                     </StackPanel>
                                 </Border>
                             </StackPanel>
@@ -251,8 +251,11 @@
                                                 <Border Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="6" Padding="8,4" Margin="0,0,6,0">
                                                     <TextBlock Text="{Binding Context.ControlType}" Foreground="#475569" FontSize="10" FontWeight="Medium"/>
                                                 </Border>
-                                                <Border Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="6" Padding="8,4">
+                                                <Border Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="6" Padding="8,4" Margin="0,0,6,0">
                                                     <TextBlock Text="{Binding Context.ProcessName}" Foreground="#475569" FontSize="10" FontWeight="Medium"/>
+                                                </Border>
+                                                <Border Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="6" Padding="8,4">
+                                                    <TextBlock Text="{Binding DocumentationStatus}" Foreground="#047857" FontSize="10" FontWeight="SemiBold"/>
                                                 </Border>
                                             </WrapPanel>
                                         </StackPanel>
