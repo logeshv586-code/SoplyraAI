@@ -9,8 +9,9 @@ namespace SoplyraAI.Services;
 
 public sealed class ReliablePdfExportService
 {
-    private const int PagePixelWidth = 1240;
-    private const int PagePixelHeight = 1754;
+    // Render A4 pages at ~216 DPI so captured UI text stays sharp when the PDF is zoomed.
+    private const int PagePixelWidth = 1800;
+    private const int PagePixelHeight = 2546;
     private const float PdfPageWidth = 595f;
     private const float PdfPageHeight = 842f;
 
@@ -98,10 +99,10 @@ public sealed class ReliablePdfExportService
         if (string.IsNullOrWhiteSpace(application)) application = "Target application";
         var window = PrivacySanitizer.Clean(context.WindowTitle, 240);
 
-        var instruction = BuildInstruction(action, element, control);
+        var instruction = BuildInstruction(action, element, control, application, window);
         var purpose = PrivacySanitizer.Clean(step.Description, 2500);
         if (string.IsNullOrWhiteSpace(purpose)) purpose = BuildPurpose(element, title, control);
-        var expected = BuildExpectedResult(element, title, purpose);
+        var expected = BuildExpectedResult(element, title, purpose, control);
 
         var imageBytes = Array.Empty<byte>();
         if (PathSecurity.TryGetTrustedPng(session.SessionFolder, step.ScreenshotPath, out var trusted, requireExists: true))
@@ -130,74 +131,102 @@ public sealed class ReliablePdfExportService
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+
         using var bitmap = NewPageBitmap();
         using var g = PrepareGraphics(bitmap);
-        g.Clear(Color.FromArgb(248, 250, 252));
 
-        using var ink = new SolidBrush(Color.FromArgb(15, 23, 42));
-        using var muted = new SolidBrush(Color.FromArgb(100, 116, 139));
-        using var primary = new SolidBrush(Color.FromArgb(79, 70, 229));
-        using var soft = new SolidBrush(Color.FromArgb(248, 250, 252));
+        var pageBackground = Color.FromArgb(247, 249, 252);
+        var inkColor = Color.FromArgb(24, 35, 58);
+        var mutedColor = Color.FromArgb(94, 111, 139);
+        var borderColor = Color.FromArgb(218, 225, 236);
+        var blue = Color.FromArgb(37, 99, 235);
+        var blueTint = Color.FromArgb(239, 246, 255);
+        var orange = Color.FromArgb(230, 126, 0);
+        var orangeTint = Color.FromArgb(255, 247, 230);
+        var green = Color.FromArgb(5, 150, 105);
+        var greenTint = Color.FromArgb(236, 253, 245);
+
+        g.Clear(pageBackground);
+
+        using var ink = new SolidBrush(inkColor);
+        using var muted = new SolidBrush(mutedColor);
+        using var blueBrush = new SolidBrush(blue);
         using var white = new SolidBrush(Color.White);
-        using var border = new Pen(Color.FromArgb(226, 232, 240), 2);
-        using var separator = new Pen(Color.FromArgb(226, 232, 240), 2);
+        using var border = new Pen(borderColor, 2.2f);
         using var guideFont = new Font("Segoe UI", 10.5f, FontStyle.Bold, GraphicsUnit.Point);
-        using var guideMetaFont = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
-        using var labelFont = new Font("Segoe UI", 9.5f, FontStyle.Bold, GraphicsUnit.Point);
+        using var guideMetaFont = new Font("Segoe UI", 9.2f, FontStyle.Regular, GraphicsUnit.Point);
+        using var stepLabelFont = new Font("Segoe UI", 9.5f, FontStyle.Bold, GraphicsUnit.Point);
         using var bodyFont = new Font("Segoe UI", 11.25f, FontStyle.Regular, GraphicsUnit.Point);
-        using var captionFont = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
-        using var metaFont = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
+        using var captionFont = new Font("Segoe UI", 8.8f, FontStyle.Regular, GraphicsUnit.Point);
+        using var contextFont = new Font("Segoe UI", 8.9f, FontStyle.Regular, GraphicsUnit.Point);
 
-        var card = new RectangleF(65, 55, 1110, 1595);
-        g.FillRectangle(white, card);
-        g.DrawRectangle(border, card.X, card.Y, card.Width, card.Height);
+        var outer = new RectangleF(58, 48, PagePixelWidth - 116, PagePixelHeight - 118);
+        DrawShadow(g, outer, 24);
+        FillRoundedRectangle(g, white, outer, 24);
+        DrawRoundedRectangle(g, border, outer, 24);
 
-        var guideName = FitText(g, document.Title, guideFont, 760, 30);
-        g.DrawString(guideName, guideFont, ink, new RectangleF(105, 77, 760, 30));
+        const float left = 112f;
+        var width = PagePixelWidth - left * 2;
+
+        // Premium document header.
+        using (var brandFont = new Font("Segoe UI", 8.5f, FontStyle.Bold, GraphicsUnit.Point))
+            g.DrawString("SOPLYRAAI  •  WORKFLOW DOCUMENTATION", brandFont, blueBrush, left, 78);
+
+        var guideName = FitText(g, document.Title, guideFont, 1000, 38);
+        g.DrawString(guideName, guideFont, ink, new RectangleF(left, 112, 1000, 38));
         g.DrawString(
             document.DocumentationType,
             guideMetaFont,
             muted,
-            new RectangleF(875, 79, 250, 28),
+            new RectangleF(1180, 112, 500, 36),
             new StringFormat { Alignment = StringAlignment.Far });
-        g.DrawLine(separator, 105, 112, 1125, 112);
 
-        g.FillEllipse(primary, 105, 132, 54, 54);
-        g.DrawString(step.Number.ToString(), bodyFont, Brushes.White, new RectangleF(105, 145, 54, 28), CenterFormat());
-        g.DrawString($"STEP {step.Number:00}", labelFont, primary, 180, 132);
+        using (var divider = new Pen(Color.FromArgb(229, 234, 243), 2))
+            g.DrawLine(divider, left, 164, PagePixelWidth - left, 164);
 
-        var titleBottom = DrawAdaptiveTitle(g, step.Title, ink, 180, 156, 930, 132);
-        var screenTop = Math.Max(245f, titleBottom + 18f);
+        // Step identity.
+        var numberBadge = new RectangleF(left, 192, 70, 70);
+        using (var badgeBrush = new SolidBrush(blue))
+            FillRoundedRectangle(g, badgeBrush, numberBadge, 18);
+        using (var numberFont = new Font("Segoe UI", 14f, FontStyle.Bold, GraphicsUnit.Point))
+            g.DrawString(step.Number.ToString(), numberFont, Brushes.White, numberBadge, CenterFormat());
 
-        // Size every block from the real content. This avoids clipping long generated descriptions
-        // and preserves enough room for long application/window context at the bottom of the page.
-        var instructionHeight = MeasureSectionHeight(g, step.Instruction, bodyFont, 1020, 96, 150);
-        var purposeHeight = MeasureSectionHeight(g, step.Purpose, bodyFont, 1020, 110, 250);
-        var expectedHeight = MeasureSectionHeight(g, step.ExpectedResult, bodyFont, 1020, 96, 180);
-        var contextText = BuildContextText(step);
-        var contextHeight = MeasureContextHeight(g, contextText, metaFont, 980);
+        g.DrawString($"STEP {step.Number:00}", stepLabelFont, blueBrush, left + 92, 192);
+        var titleBottom = DrawAdaptiveTitle(g, step.Title, ink, left + 92, 220, width - 92, 115);
+        var screenTop = Math.Max(330f, titleBottom + 22f);
 
-        const float contentBottom = 1620f;
-        const float captionAndSpacing = 46f;
-        var belowScreenHeight =
-            18f + captionAndSpacing +
-            instructionHeight + 12f +
-            purposeHeight + 12f +
-            expectedHeight + 14f +
+        // Measure the premium guidance cards before deciding how much room the screenshot gets.
+        var sectionWidth = width;
+        var instructionHeight = MeasureSectionHeight(g, step.Instruction, bodyFont, sectionWidth, 142, 230);
+        var purposeHeight = MeasureSectionHeight(g, step.Purpose, bodyFont, sectionWidth, 155, 300);
+        var expectedHeight = MeasureSectionHeight(g, step.ExpectedResult, bodyFont, sectionWidth, 142, 250);
+        const float sectionGap = 18f;
+        const float captionHeight = 48f;
+        const float contextHeight = 64f;
+        const float contentBottom = 2390f;
+
+        var belowScreen =
+            captionHeight +
+            instructionHeight + sectionGap +
+            purposeHeight + sectionGap +
+            expectedHeight + sectionGap +
             contextHeight;
 
-        var screenHeight = Math.Clamp(contentBottom - screenTop - belowScreenHeight, 300f, 560f);
-        var screenRect = new RectangleF(105, screenTop, 1020, screenHeight);
-        g.FillRectangle(soft, screenRect);
-        g.DrawRectangle(border, screenRect.X, screenRect.Y, screenRect.Width, screenRect.Height);
+        var screenHeight = Math.Clamp(contentBottom - screenTop - belowScreen, 360f, 790f);
+        var screenRect = new RectangleF(left, screenTop, width, screenHeight);
+
+        DrawShadow(g, screenRect, 18, 5, 10);
+        FillRoundedRectangle(g, white, screenRect, 18);
+        DrawRoundedRectangle(g, border, screenRect, 18);
 
         if (step.ImageBytes.Length > 0)
         {
             try
             {
                 using var stream = new MemoryStream(step.ImageBytes, writable: false);
-                using var image = Image.FromStream(stream, useEmbeddedColorManagement: false, validateImageData: true);
-                var target = FitImage(image.Width, image.Height, screenRect, 18);
+                using var image = Image.FromStream(stream, useEmbeddedColorManagement: true, validateImageData: true);
+                var imageContainer = new RectangleF(screenRect.X + 14, screenRect.Y + 14, screenRect.Width - 28, screenRect.Height - 28);
+                var target = FitImage(image.Width, image.Height, imageContainer, 0);
                 g.DrawImage(image, target);
             }
             catch
@@ -210,31 +239,133 @@ public sealed class ReliablePdfExportService
             DrawMissingScreenshot(g, screenRect, bodyFont, muted);
         }
 
-        var y = screenRect.Bottom + 18;
+        var y = screenRect.Bottom + 14;
         g.DrawString(
-            $"Captured screen for Step {step.Number}. The action and result are explained below.",
+            $"Captured screen • Step {step.Number:00} • highlighted target shows the recorded interaction",
             captionFont,
             muted,
-            new RectangleF(105, y, 1020, 32));
-        y += captionAndSpacing;
+            new RectangleF(left + 4, y, width - 8, 34));
+        y += captionHeight;
 
-        y = DrawTextSection(g, "HOW TO PERFORM", step.Instruction, 105, y, 1020, instructionHeight, labelFont, bodyFont, primary, ink, border) + 12;
-        y = DrawTextSection(g, "WHAT THIS DOES", step.Purpose, 105, y, 1020, purposeHeight, labelFont, bodyFont, primary, ink, border) + 12;
-        y = DrawTextSection(g, "EXPECTED RESULT", step.ExpectedResult, 105, y, 1020, expectedHeight, labelFont, bodyFont, primary, ink, border) + 14;
+        y = DrawPremiumSection(
+            g, "i", "HOW TO PERFORM", step.Instruction,
+            left, y, sectionWidth, instructionHeight,
+            blue, blueTint, inkColor, borderColor, bodyFont) + sectionGap;
 
-        g.FillRectangle(soft, 105, y, 1020, contextHeight);
-        g.DrawRectangle(border, 105, y, 1020, contextHeight);
-        var fittedContext = FitText(g, contextText, metaFont, 980, contextHeight - 26);
-        g.DrawString(
-            fittedContext,
-            metaFont,
-            muted,
-            new RectangleF(125, y + 13, 980, contextHeight - 22),
-            new StringFormat { Trimming = StringTrimming.EllipsisWord });
+        y = DrawPremiumSection(
+            g, "→", "WHAT THIS DOES", step.Purpose,
+            left, y, sectionWidth, purposeHeight,
+            orange, orangeTint, inkColor, borderColor, bodyFont) + sectionGap;
+
+        y = DrawPremiumSection(
+            g, "✓", "EXPECTED RESULT", step.ExpectedResult,
+            left, y, sectionWidth, expectedHeight,
+            green, greenTint, inkColor, borderColor, bodyFont) + sectionGap;
+
+        DrawContextPills(g, step, left, y, width, contextFont, inkColor, mutedColor, borderColor);
 
         DrawFooter(g, pageNumber, document.Steps.Count, captionFont, muted);
         return EncodePage(bitmap);
     }
+
+    private static float DrawPremiumSection(
+        Graphics g,
+        string icon,
+        string label,
+        string text,
+        float x,
+        float y,
+        float width,
+        float height,
+        Color accent,
+        Color tint,
+        Color bodyColor,
+        Color borderColor,
+        Font bodyFont)
+    {
+        var rect = new RectangleF(x, y, width, height);
+        using var white = new SolidBrush(Color.White);
+        using var border = new Pen(borderColor, 2f);
+        FillRoundedRectangle(g, white, rect, 18);
+        DrawRoundedRectangle(g, border, rect, 18);
+
+        var iconRect = new RectangleF(x + 22, y + 20, 38, 38);
+        using var tintBrush = new SolidBrush(tint);
+        using var accentBrush = new SolidBrush(accent);
+        FillRoundedRectangle(g, tintBrush, iconRect, 10);
+        using (var iconFont = new Font("Segoe UI", 9.8f, FontStyle.Bold, GraphicsUnit.Point))
+            g.DrawString(icon, iconFont, accentBrush, iconRect, CenterFormat());
+
+        using (var labelFont = new Font("Segoe UI", 9.4f, FontStyle.Bold, GraphicsUnit.Point))
+        {
+            var labelFormat = new StringFormat(StringFormat.GenericTypographic);
+            g.DrawString(label, labelFont, accentBrush, new RectangleF(x + 76, y + 23, width - 102, 34), labelFormat);
+        }
+
+        var bodyTop = y + 72;
+        var bodyHeight = height - 92;
+        var fitted = FitText(g, text, bodyFont, width - 48, bodyHeight);
+        using var bodyBrush = new SolidBrush(bodyColor);
+        using var bodyFormat = new StringFormat(StringFormat.GenericTypographic)
+        {
+            Trimming = StringTrimming.EllipsisWord,
+            FormatFlags = StringFormatFlags.LineLimit
+        };
+        g.DrawString(
+            fitted,
+            bodyFont,
+            bodyBrush,
+            new RectangleF(x + 24, bodyTop, width - 48, bodyHeight),
+            bodyFormat);
+
+        return y + height;
+    }
+
+    private static void DrawContextPills(
+        Graphics g,
+        PdfStepData step,
+        float x,
+        float y,
+        float maxWidth,
+        Font font,
+        Color inkColor,
+        Color mutedColor,
+        Color borderColor)
+    {
+        var cursor = x;
+        cursor = DrawPill(g, $"Action: {step.Action}", cursor, y, font, inkColor, borderColor);
+        cursor += 14;
+        cursor = DrawPill(g, $"Control: {step.Control}", cursor, y, font, inkColor, borderColor);
+        cursor += 14;
+
+        var application = $"Application: {step.Application}";
+        var applicationWidth = MeasurePillWidth(g, application, font);
+        if (cursor + applicationWidth <= x + maxWidth)
+            _ = DrawPill(g, application, cursor, y, font, mutedColor, borderColor);
+    }
+
+    private static float DrawPill(
+        Graphics g,
+        string text,
+        float x,
+        float y,
+        Font font,
+        Color textColor,
+        Color borderColor)
+    {
+        var width = MeasurePillWidth(g, text, font);
+        var rect = new RectangleF(x, y, width, 44);
+        using var fill = new SolidBrush(Color.FromArgb(250, 252, 255));
+        using var border = new Pen(borderColor, 1.6f);
+        using var brush = new SolidBrush(textColor);
+        FillRoundedRectangle(g, fill, rect, 11);
+        DrawRoundedRectangle(g, border, rect, 11);
+        g.DrawString(text, font, brush, new RectangleF(x + 14, y + 9, width - 28, 28));
+        return x + width;
+    }
+
+    private static float MeasurePillWidth(Graphics g, string text, Font font) =>
+        Math.Clamp(g.MeasureString(text, font).Width + 30f, 112f, 430f);
 
     private static float DrawAdaptiveTitle(
         Graphics g,
@@ -254,7 +385,7 @@ public sealed class ReliablePdfExportService
             Trimming = StringTrimming.EllipsisWord
         };
 
-        float[] sizes = { 20f, 19f, 18f, 17f, 16f, 15f, 14f };
+        float[] sizes = { 20f, 19f, 18f, 17f, 16f, 15f };
         foreach (var size in sizes)
         {
             using var font = new Font("Segoe UI", size, FontStyle.Bold, GraphicsUnit.Point);
@@ -273,10 +404,25 @@ public sealed class ReliablePdfExportService
         return y + Math.Min(maxHeight, fallbackSize.Height);
     }
 
+    private static float MeasureSectionHeight(
+        Graphics g,
+        string? text,
+        Font bodyFont,
+        float width,
+        float minHeight,
+        float maxHeight)
+    {
+        var clean = PrivacySanitizer.Clean(text, 4000);
+        if (string.IsNullOrWhiteSpace(clean)) clean = "Not available.";
+        var availableWidth = Math.Max(1f, width - 48f);
+        var measured = g.MeasureString(clean, bodyFont, new SizeF(availableWidth, maxHeight - 92f)).Height;
+        return Math.Clamp(measured + 102f, minHeight, maxHeight);
+    }
+
     private static Bitmap NewPageBitmap()
     {
         var bitmap = new Bitmap(PagePixelWidth, PagePixelHeight, PixelFormat.Format24bppRgb);
-        bitmap.SetResolution(150f, 150f);
+        bitmap.SetResolution(216f, 216f);
         return bitmap;
     }
 
@@ -284,9 +430,10 @@ public sealed class ReliablePdfExportService
     {
         var g = Graphics.FromImage(bitmap);
         g.SmoothingMode = SmoothingMode.HighQuality;
+        g.CompositingQuality = CompositingQuality.HighQuality;
         g.InterpolationMode = InterpolationMode.HighQualityBicubic;
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-        g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+        g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
         return g;
     }
 
@@ -301,9 +448,10 @@ public sealed class ReliablePdfExportService
         else
         {
             using var parameters = new EncoderParameters(1);
-            parameters.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 90L);
+            parameters.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 96L);
             bitmap.Save(stream, codec, parameters);
         }
+
         return new RasterPage(PagePixelWidth, PagePixelHeight, stream.ToArray());
     }
 
@@ -410,57 +558,6 @@ public sealed class ReliablePdfExportService
         }
     }
 
-    private static float DrawTextSection(
-        Graphics g,
-        string label,
-        string text,
-        float x,
-        float y,
-        float width,
-        float height,
-        Font labelFont,
-        Font bodyFont,
-        Brush labelBrush,
-        Brush bodyBrush,
-        Pen border)
-    {
-        g.DrawRectangle(border, x, y, width, height);
-        g.DrawString(label, labelFont, labelBrush, x + 18, y + 13);
-        var fitted = FitText(g, text, bodyFont, width - 36, height - 45);
-        g.DrawString(fitted, bodyFont, bodyBrush, new RectangleF(x + 18, y + 39, width - 36, height - 45));
-        return y + height;
-    }
-
-    private static float MeasureSectionHeight(
-        Graphics g,
-        string? text,
-        Font bodyFont,
-        float width,
-        float minHeight,
-        float maxHeight)
-    {
-        var clean = PrivacySanitizer.Clean(text, 4000);
-        if (string.IsNullOrWhiteSpace(clean)) clean = "Not available.";
-        var availableWidth = Math.Max(1f, width - 36f);
-        var measured = g.MeasureString(clean, bodyFont, new SizeF(availableWidth, maxHeight - 45f)).Height;
-        return Math.Clamp(measured + 54f, minHeight, maxHeight);
-    }
-
-    private static float MeasureContextHeight(Graphics g, string text, Font font, float width)
-    {
-        var clean = PrivacySanitizer.Clean(text, 1200);
-        var measured = g.MeasureString(clean, font, new SizeF(width, 120f)).Height;
-        return Math.Clamp(measured + 30f, 62f, 140f);
-    }
-
-    private static string BuildContextText(PdfStepData step)
-    {
-        var firstLine = $"Action: {step.Action}   ·   Control: {step.Control}   ·   Application: {step.Application}";
-        return string.IsNullOrWhiteSpace(step.Window)
-            ? firstLine
-            : firstLine + Environment.NewLine + "Window: " + step.Window;
-    }
-
     private static string FitText(Graphics g, string? value, Font font, float width, float maxHeight)
     {
         var text = PrivacySanitizer.Clean(value, 4000);
@@ -480,6 +577,7 @@ public sealed class ReliablePdfExportService
             if (builder.Length > 0) builder.Append(' ');
             builder.Append(word);
         }
+
         return builder.Length == 0 ? "…" : builder + "…";
     }
 
@@ -508,61 +606,99 @@ public sealed class ReliablePdfExportService
             CenterFormat());
     }
 
-    private static StringFormat CenterFormat() => new()
-    {
-        Alignment = StringAlignment.Center,
-        LineAlignment = StringAlignment.Center
-    };
-
     private static void DrawFooter(Graphics g, int page, int total, Font font, Brush muted)
     {
-        g.DrawString("Generated locally with SoplyraAI", font, muted, 105, 1665);
-        g.DrawString($"Page {page} of {total}", font, muted, new RectangleF(900, 1665, 225, 30), new StringFormat { Alignment = StringAlignment.Far });
+        g.DrawString("Generated locally with SoplyraAI • Private workflow documentation", font, muted, 112, 2468);
+        g.DrawString(
+            $"Page {page} of {total}",
+            font,
+            muted,
+            new RectangleF(1400, 2468, 280, 34),
+            new StringFormat { Alignment = StringAlignment.Far });
     }
 
-    private static string BuildInstruction(string action, string element, string control)
+    private static string BuildInstruction(
+        string action,
+        string element,
+        string control,
+        string application,
+        string window)
     {
-        var target = control.Contains("button", StringComparison.OrdinalIgnoreCase)
-            ? $"the “{element}” button"
-            : control.Contains("tab", StringComparison.OrdinalIgnoreCase)
-                ? $"the “{element}” tab"
-                : control.Contains("menu", StringComparison.OrdinalIgnoreCase)
-                    ? $"the “{element}” menu item"
-                    : $"“{element}”";
+        var normalized = control.ToLowerInvariant();
+        var target = $"“{element}”";
+        var location = normalized.Contains("toolbar")
+            ? " from the toolbar area"
+            : normalized.Contains("tab")
+                ? " tab"
+                : normalized.Contains("menu")
+                    ? " menu item"
+                    : normalized.Contains("button")
+                        ? " button"
+                        : normalized.Contains("combo") || normalized.Contains("drop")
+                            ? " drop-down"
+                            : normalized.Contains("edit") || normalized.Contains("text")
+                                ? " field"
+                                : normalized.Contains("link") || normalized.Contains("hyperlink")
+                                    ? " link"
+                                    : " control";
 
-        if (action.Equals("Right-click", StringComparison.OrdinalIgnoreCase)) return $"Right-click {target} to open its available context actions.";
-        if (action.Equals("Middle-click", StringComparison.OrdinalIgnoreCase)) return $"Middle-click {target}.";
-        if (action.Equals("Select", StringComparison.OrdinalIgnoreCase)) return $"Select {target}.";
-        return $"Click {target}.";
+        if (element.Equals("highlighted area", StringComparison.OrdinalIgnoreCase))
+            return $"{action} the highlighted area shown in the captured screen. Use the screenshot as the authoritative visual reference because Windows did not expose a more specific control name.";
+
+        var verb = action.Equals("Right-click", StringComparison.OrdinalIgnoreCase)
+            ? "Right-click"
+            : action.Equals("Middle-click", StringComparison.OrdinalIgnoreCase)
+                ? "Middle-click"
+                : action.Equals("Select", StringComparison.OrdinalIgnoreCase)
+                    ? "Select"
+                    : "Click";
+
+        var context = string.IsNullOrWhiteSpace(window)
+            ? $" in {application}"
+            : $" in {window}";
+
+        return $"{verb} {target}{location}{context}. Use the highlighted target in the captured screen to confirm the correct control before continuing.";
     }
 
     private static string BuildPurpose(string element, string title, string control)
     {
         var text = $"{element} {title}".ToLowerInvariant();
-        if (ContainsAny(text, "save", "apply")) return "This stores the current changes so the workflow can continue without losing the entered information.";
-        if (ContainsAny(text, "submit", "send")) return "This sends the current information to the application for processing.";
-        if (ContainsAny(text, "add", "create", "new")) return "This starts or creates a new item in the current workflow.";
-        if (ContainsAny(text, "delete", "remove")) return "This removes the selected item from the current workflow, subject to any confirmation shown by the application.";
-        if (ContainsAny(text, "search", "find")) return "This runs the current search or filter so matching results can be reviewed.";
-        if (ContainsAny(text, "next", "continue")) return "This advances the workflow to the next stage or screen.";
-        if (ContainsAny(text, "back", "previous")) return "This returns the workflow to the previous stage or screen.";
-        if (ContainsAny(text, "login", "sign in", "log in")) return "This starts the sign-in action so the authorized workflow can continue.";
-        if (control.Contains("tab", StringComparison.OrdinalIgnoreCase)) return "This switches the application to the selected section so its controls and information become available.";
-        return "This activates the selected control and updates the application for the next recorded step.";
+        if (ContainsAny(text, "save", "apply")) return "Saves the current changes so the workflow can continue without losing the information already entered.";
+        if (ContainsAny(text, "submit", "send")) return "Submits the current information to the application for processing and advances the workflow when accepted.";
+        if (ContainsAny(text, "add", "create", "new")) return "Starts a new item or entry so the next part of the workflow can be completed.";
+        if (ContainsAny(text, "delete", "remove")) return "Removes the selected item, subject to any confirmation or permission check shown by the application.";
+        if (ContainsAny(text, "search", "find")) return "Runs the current search or filter so matching information can be reviewed.";
+        if (ContainsAny(text, "next", "continue")) return "Advances the workflow to the next stage or screen.";
+        if (ContainsAny(text, "back", "previous")) return "Returns the workflow to the previous stage or screen.";
+        if (ContainsAny(text, "login", "sign in", "log in")) return "Starts the sign-in action so the authorized workflow can continue.";
+        if (control.Contains("tab", StringComparison.OrdinalIgnoreCase)) return "Switches the application to the selected section so its controls and information become available.";
+        if (control.Contains("toolbar", StringComparison.OrdinalIgnoreCase)) return "Opens or activates the selected toolbar action so its related commands or options can be used.";
+        if (control.Contains("menu", StringComparison.OrdinalIgnoreCase)) return "Executes or opens the selected menu action so the relevant options become available.";
+        return "Activates the selected control and moves the application into the state required for the next recorded step.";
     }
 
-    private static string BuildExpectedResult(string element, string title, string purpose)
+    private static string BuildExpectedResult(string element, string title, string purpose, string control)
     {
         var text = $"{element} {title} {purpose}".ToLowerInvariant();
-        if (ContainsAny(text, "save", "apply")) return "The application should confirm or retain the saved changes, and the updated information should remain available.";
-        if (ContainsAny(text, "submit", "send")) return "The application should submit the information and display the next stage, a confirmation, or a status update.";
-        if (ContainsAny(text, "add", "create", "new")) return "A new item or entry should become available for the next part of the workflow.";
+        if (ContainsAny(text, "save", "apply")) return "The application should retain the saved changes and show the updated information without requiring the user to repeat the entry.";
+        if (ContainsAny(text, "submit", "send")) return "The application should accept the information and display the next stage, confirmation, or processing status.";
+        if (ContainsAny(text, "add", "create", "new")) return "A new item or entry should become available and be ready for the next required action.";
         if (ContainsAny(text, "delete", "remove")) return "The selected item should no longer appear after any required confirmation is completed.";
         if (ContainsAny(text, "search", "find")) return "The visible results should refresh to match the current search or filter criteria.";
-        if (ContainsAny(text, "next", "continue")) return "The next screen or workflow stage should become visible.";
-        if (ContainsAny(text, "back", "previous")) return "The previous screen or workflow stage should become visible.";
-        if (ContainsAny(text, "login", "sign in", "log in")) return "The authorized application screen should become available if the sign-in is successful.";
-        return "The interface should respond to the selected control and leave the application ready for the next recorded step.";
+        if (ContainsAny(text, "next", "continue")) return "The next workflow screen or stage should become visible and ready for input.";
+        if (ContainsAny(text, "back", "previous")) return "The previous workflow screen or stage should become visible.";
+        if (ContainsAny(text, "login", "sign in", "log in")) return "The authorized application screen should become available when authentication succeeds.";
+
+        var normalized = control.ToLowerInvariant();
+        if (normalized.Contains("toolbar")) return "The related toolbar menu, command, or panel should become available, leaving the interface ready for the next recorded step.";
+        if (normalized.Contains("tab")) return "The selected section should become active and its associated content should be visible.";
+        if (normalized.Contains("menu")) return "The selected menu action should open or execute, and the resulting interface state should be visible.";
+        if (normalized.Contains("combo") || normalized.Contains("drop")) return "The available choices should appear so the required option can be selected.";
+        if (normalized.Contains("check")) return "The setting should change to the selected state and remain visible in the interface.";
+        if (normalized.Contains("edit") || normalized.Contains("text")) return "The field should receive focus and be ready for the next allowed input.";
+        if (normalized.Contains("link") || normalized.Contains("hyperlink")) return "The linked destination or related view should open successfully.";
+
+        return "The interface should respond to the selected control and remain in a stable state ready for the next recorded step.";
     }
 
     private static bool ContainsAny(string value, params string[] tokens) => tokens.Any(value.Contains);
@@ -575,6 +711,48 @@ public sealed class ReliablePdfExportService
             .Trim();
         return string.IsNullOrWhiteSpace(value) ? "selected control" : value;
     }
+
+    private static void DrawShadow(Graphics g, RectangleF rect, float radius, float offsetX = 5, float offsetY = 8)
+    {
+        var shadow = new RectangleF(rect.X + offsetX, rect.Y + offsetY, rect.Width, rect.Height);
+        using var brush = new SolidBrush(Color.FromArgb(18, 30, 50, 80));
+        FillRoundedRectangle(g, brush, shadow, radius);
+    }
+
+    private static void FillRoundedRectangle(Graphics g, Brush brush, RectangleF rect, float radius)
+    {
+        using var path = RoundedRectangle(rect, radius);
+        g.FillPath(brush, path);
+    }
+
+    private static void DrawRoundedRectangle(Graphics g, Pen pen, RectangleF rect, float radius)
+    {
+        using var path = RoundedRectangle(rect, radius);
+        g.DrawPath(pen, path);
+    }
+
+    private static GraphicsPath RoundedRectangle(RectangleF rect, float radius)
+    {
+        var diameter = Math.Min(radius * 2, Math.Min(rect.Width, rect.Height));
+        var arc = new RectangleF(rect.X, rect.Y, diameter, diameter);
+        var path = new GraphicsPath();
+
+        path.AddArc(arc, 180, 90);
+        arc.X = rect.Right - diameter;
+        path.AddArc(arc, 270, 90);
+        arc.Y = rect.Bottom - diameter;
+        path.AddArc(arc, 0, 90);
+        arc.X = rect.Left;
+        path.AddArc(arc, 90, 90);
+        path.CloseFigure();
+        return path;
+    }
+
+    private static StringFormat CenterFormat() => new()
+    {
+        Alignment = StringAlignment.Center,
+        LineAlignment = StringAlignment.Center
+    };
 
     private sealed record PdfDocumentData(
         string Title,
