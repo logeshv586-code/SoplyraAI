@@ -34,12 +34,15 @@ public partial class SettingsWindow : Window
         NoAiRadio.IsChecked = !settings.EnableAi;
         LocalRadio.IsChecked = settings.EnableAi && AiProviderCatalog.IsLocal(selected.Id);
         CloudRadio.IsChecked = settings.EnableAi && !AiProviderCatalog.IsLocal(selected.Id);
-        LocalModelBox.SelectedItem = AiProviderCatalog.LocalModels.Contains(settings.AiModel) ? settings.AiModel : AiProviderCatalog.Get("Ollama").DefaultModel;
+        LocalModelBox.SelectedItem = AiProviderCatalog.LocalModels.Contains(settings.AiModel)
+            ? settings.AiModel
+            : AiProviderCatalog.Get("Ollama").DefaultModel;
         var cloudIndex = AiProviderCatalog.Cloud.ToList().FindIndex(x => x.Id.Equals(selected.Id, StringComparison.OrdinalIgnoreCase));
         ProviderBox.SelectedIndex = cloudIndex >= 0 ? cloudIndex : 0;
         ModelBox.Text = settings.AiModel;
         ApiKeyBox.Password = settings.AiApiKey;
         VisionCheck.IsChecked = settings.SendScreenshotsToAi;
+        LocalVisionCheck.IsChecked = settings.SendScreenshotsToAi;
         DelayBox.Text = settings.CaptureDelayMs.ToString();
         ScreenshotModeBox.SelectedIndex = settings.ScreenshotMode.Equals("FullDesktop", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
         ExportFormatBox.SelectedIndex = settings.DefaultExportFormat switch { "Word" => 1, "HTML" => 2, "All" => 3, _ => 0 };
@@ -47,8 +50,11 @@ public partial class SettingsWindow : Window
 
         Loaded += async (_, _) =>
         {
+            UpdateLocalVisionOption();
             if (LocalRadio.IsChecked == true)
                 await RefreshLocalModelStatusAsync();
+            if (CloudRadio.IsChecked == true)
+                RefreshCloudProvider(resetModel: false);
         };
     }
 
@@ -66,14 +72,37 @@ public partial class SettingsWindow : Window
         CloudPanel.Visibility = cloud ? Visibility.Visible : Visibility.Collapsed;
         BuiltInPanel.Visibility = noAi ? Visibility.Visible : Visibility.Collapsed;
         if (!local) SetupProgressPanel.Visibility = Visibility.Collapsed;
-        if (local && IsLoaded) _ = RefreshLocalModelStatusAsync();
+        if (local)
+        {
+            UpdateLocalVisionOption();
+            if (IsLoaded) _ = RefreshLocalModelStatusAsync();
+        }
         if (cloud) RefreshCloudProvider(resetModel: false);
     }
 
     private async void LocalModelBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        UpdateLocalVisionOption();
+        MemoryRecoveryPanel.Visibility = Visibility.Collapsed;
         if (IsLoaded && LocalRadio.IsChecked == true)
             await RefreshLocalModelStatusAsync();
+    }
+
+    private void UpdateLocalVisionOption()
+    {
+        if (LocalVisionCheck is null || LocalVisionNote is null || LocalModelBox is null) return;
+        var model = LocalModelBox.SelectedItem?.ToString() ?? AiProviderCatalog.Get("Ollama").DefaultModel;
+        var supportsVision = AiProviderCatalog.IsVisionModel("Ollama", model);
+        LocalVisionCheck.IsEnabled = supportsVision;
+        if (!supportsVision)
+        {
+            LocalVisionCheck.IsChecked = false;
+            LocalVisionNote.Text = $"{model} is a text model and cannot inspect screenshots. Choose qwen2.5vl:3b or gemma3:4b to enable local screenshot vision.";
+        }
+        else
+        {
+            LocalVisionNote.Text = $"{model} supports images. Check this option to let the local model inspect each captured screenshot; images stay on this PC.";
+        }
     }
 
     private async Task RefreshLocalModelStatusAsync()
@@ -106,6 +135,7 @@ public partial class SettingsWindow : Window
         _selectedLocalModelInstalled = status.ModelInstalled;
         SetupButton.Content = status.ModelInstalled ? "Use installed model" : "Download & use model";
         UpdateLocalStateCards(status);
+        UpdateLocalVisionOption();
 
         if (status.ModelInstalled)
         {
@@ -116,21 +146,12 @@ public partial class SettingsWindow : Window
 
     private void UpdateLocalStateCards(LocalModelStatus status)
     {
-        SetStateCard(
-            ModelStateCard,
-            ModelStateText,
+        SetStateCard(ModelStateCard, ModelStateText,
             status.ModelInstalled ? "✓ Installed" : "Not installed",
             status.ModelInstalled ? StateKind.Good : StateKind.Warning);
 
-        var serviceText = status.ServiceReady
-            ? "✓ Ollama running"
-            : status.OllamaInstalled
-                ? "Needs startup"
-                : "Not installed";
-        SetStateCard(
-            ServiceStateCard,
-            ServiceStateText,
-            serviceText,
+        var serviceText = status.ServiceReady ? "✓ Ollama running" : status.OllamaInstalled ? "Needs startup" : "Not installed";
+        SetStateCard(ServiceStateCard, ServiceStateText, serviceText,
             status.ServiceReady ? StateKind.Good : StateKind.Warning);
     }
 
@@ -184,33 +205,41 @@ public partial class SettingsWindow : Window
     {
         string[] preference = selectedModel.ToLowerInvariant() switch
         {
-            "qwen3:4b" => new[] { "qwen2.5vl:3b", "gemma3:4b", "deepseek-r1:7b" },
-            "qwen2.5vl:3b" => new[] { "gemma3:4b", "deepseek-r1:7b", "qwen3:4b" },
-            "deepseek-r1:7b" => new[] { "qwen2.5vl:3b", "gemma3:4b", "qwen3:4b" },
-            "gemma3:4b" => new[] { "qwen2.5vl:3b", "deepseek-r1:7b", "qwen3:4b" },
+            "qwen3:1.7b" => new[] { "qwen3:4b", "qwen2.5vl:3b", "gemma3:4b" },
+            "qwen3:4b" => new[] { "qwen2.5vl:3b", "qwen3:1.7b", "gemma3:4b" },
+            "qwen2.5vl:3b" => new[] { "qwen3:4b", "qwen3:1.7b", "gemma3:4b" },
+            "deepseek-r1:7b" => new[] { "qwen2.5vl:3b", "qwen3:1.7b", "qwen3:4b" },
+            "gemma3:4b" => new[] { "qwen2.5vl:3b", "qwen3:1.7b", "qwen3:4b" },
             _ => AiProviderCatalog.LocalModels.Where(x => !x.Equals(selectedModel, StringComparison.OrdinalIgnoreCase)).ToArray()
         };
 
-        var next = preference.FirstOrDefault(candidate =>
-            !installedModels.Any(item => item.Equals(candidate, StringComparison.OrdinalIgnoreCase)));
-
+        var next = preference.FirstOrDefault(candidate => !installedModels.Any(item => item.Equals(candidate, StringComparison.OrdinalIgnoreCase)));
         if (next is null)
             return "All recommended SoplyraAI local models are already installed. You can switch between them without downloading again.";
 
         var benefit = next.ToLowerInvariant() switch
         {
+            "qwen3:1.7b" => "uses much less memory and is the best recovery option when a larger model cannot load",
             "qwen2.5vl:3b" => "adds screenshot vision for stronger understanding of what is visible on screen",
-            "gemma3:4b" => "adds another multimodal option for richer screenshot-aware documentation",
-            "deepseek-r1:7b" => "adds deeper reasoning for more complex workflow descriptions",
-            _ => "adds another local documentation option"
+            "gemma3:4b" => "adds another multimodal option for screenshot-aware documentation",
+            _ => "adds stronger local text documentation when your system has enough free memory"
         };
-
-        return $"Advanced option: {next} {benefit}. Select it above and download it when you want more capability; {selectedModel} will remain installed.";
+        return $"Optional model: {next} {benefit}. Selecting another model never removes {selectedModel}.";
     }
 
     private void ProviderBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (IsLoaded) RefreshCloudProvider(resetModel: true);
+    }
+
+    private void ModelBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (IsLoaded) UpdateCloudVisionOption();
+    }
+
+    private void ModelBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (IsLoaded) UpdateCloudVisionOption();
     }
 
     private void RefreshCloudProvider(bool resetModel)
@@ -222,10 +251,37 @@ public partial class SettingsWindow : Window
         if (resetModel || string.IsNullOrWhiteSpace(ModelBox.Text))
             ModelBox.Text = provider.DefaultModel;
         ProviderNote.Text = provider.Note;
-        VisionCheck.IsEnabled = provider.SupportsVision;
-        if (!provider.SupportsVision) VisionCheck.IsChecked = false;
+        UpdateCloudVisionOption();
         CloudDiagnosticPanel.Visibility = Visibility.Collapsed;
         CloudDiagnosticText.Text = "";
+    }
+
+    private void UpdateCloudVisionOption()
+    {
+        if (VisionCheck is null || CloudVisionNote is null || ProviderBox is null || ModelBox is null) return;
+        var options = AiProviderCatalog.Cloud;
+        var index = Math.Clamp(ProviderBox.SelectedIndex, 0, options.Count - 1);
+        var provider = options[index];
+        var model = PrivacySanitizer.Clean(ModelBox.Text, 120);
+        var supportsVision = provider.SupportsVision && AiProviderCatalog.IsVisionModel(provider.Id, model);
+        VisionCheck.IsEnabled = supportsVision;
+        if (!supportsVision)
+        {
+            VisionCheck.IsChecked = false;
+            CloudVisionNote.Text = $"Screenshot vision is not available for {provider.DisplayName} · {model}. SoplyraAI will still create documentation from captured UI metadata.";
+        }
+        else
+        {
+            CloudVisionNote.Text = "Vision is available. Check this option only when you want captured screenshots sent to this cloud provider; if image input fails, SoplyraAI retries metadata-only.";
+        }
+    }
+
+    private async void UseLightweightModel_Click(object sender, RoutedEventArgs e)
+    {
+        LocalModelBox.SelectedItem = "qwen3:1.7b";
+        MemoryRecoveryPanel.Visibility = Visibility.Collapsed;
+        UpdateLocalVisionOption();
+        await RefreshLocalModelStatusAsync();
     }
 
     private async void SetupButton_Click(object sender, RoutedEventArgs e)
@@ -233,27 +289,19 @@ public partial class SettingsWindow : Window
         var model = LocalModelBox.SelectedItem?.ToString() ?? AiProviderCatalog.Get("Ollama").DefaultModel;
         var wasInstalled = _selectedLocalModelInstalled;
         SetLocalSetupBusy(true);
+        MemoryRecoveryPanel.Visibility = Visibility.Collapsed;
         SetAiState("Preparing…", StateKind.Neutral, $"Preparing {model} for a real inference test.");
         ShowSetupProgress(
-            phase: wasInstalled ? $"Preparing installed model · {model}" : $"Preparing {model}",
-            percent: wasInstalled ? 100 : null,
-            detail: wasInstalled
-                ? "This model already exists on this PC. SoplyraAI is starting Ollama and preparing it for use — no redownload is required."
-                : "Checking Ollama and local model requirements…",
-            indeterminate: !wasInstalled);
+            wasInstalled ? $"Preparing installed model · {model}" : $"Preparing {model}",
+            wasInstalled ? 100 : null,
+            wasInstalled ? "This model already exists on this PC. SoplyraAI is preparing it for use — no redownload is required." : "Checking Ollama and local model requirements…",
+            !wasInstalled);
 
-        var result = await _setup.SetupAsync(
-            model,
-            line => Dispatcher.BeginInvoke(new Action(() => UpdateSetupProgressFromLog(model, line))));
-
+        var result = await _setup.SetupAsync(model, line => Dispatcher.BeginInvoke(new Action(() => UpdateSetupProgressFromLog(model, line))));
         if (!result.StartsWith("Local AI is ready:", StringComparison.OrdinalIgnoreCase))
         {
             SetAiState("Not active", StateKind.Bad, result);
-            ShowSetupProgress(
-                phase: "Local model could not be prepared",
-                percent: null,
-                detail: result,
-                indeterminate: false);
+            ShowSetupProgress("Local model could not be prepared", null, result, false);
             SetupStatus.Text = result;
             SetLocalSetupBusy(false);
             await RefreshLocalModelStatusAsync();
@@ -262,42 +310,21 @@ public partial class SettingsWindow : Window
 
         var alreadyInstalled = result.Contains("already installed", StringComparison.OrdinalIgnoreCase) || wasInstalled;
         var candidate = BuildCandidate();
-        ShowSetupProgress(
-            phase: alreadyInstalled ? "Using installed model" : "Verifying downloaded model",
-            percent: 100,
-            detail: alreadyInstalled
-                ? $"{model} is already stored locally. SoplyraAI is checking that the model can answer requests."
-                : $"{model} is downloaded. SoplyraAI is checking the local AI connection…",
-            indeterminate: false);
+        ShowSetupProgress(alreadyInstalled ? "Using installed model" : "Verifying downloaded model", 100,
+            alreadyInstalled ? $"{model} is already stored locally. SoplyraAI is checking that the model can answer requests." : $"{model} is downloaded. SoplyraAI is checking the local AI connection…", false);
 
         var connection = await _describer.TestConnectionAsync(candidate);
         if (!connection.StartsWith("Connected to ", StringComparison.OrdinalIgnoreCase))
         {
-            ShowSetupProgress(
-                phase: "Starting local AI service",
-                percent: 100,
-                detail: "The model files are present. SoplyraAI is restarting/checking Ollama and allowing the model extra time to warm up.",
-                indeterminate: false);
-
             _ = await _setup.GetStatusAsync(model);
-            await Task.Delay(1800);
+            await Task.Delay(1500);
             connection = await _describer.TestConnectionAsync(candidate);
         }
 
         if (!connection.StartsWith("Connected to ", StringComparison.OrdinalIgnoreCase))
         {
-            _selectedLocalModelInstalled = true;
-            SetupButton.Content = "Use installed model";
-            SetAiState("Test failed", StateKind.Bad, connection);
-            ShowSetupProgress(
-                phase: "Model installed · inference test failed",
-                percent: 100,
-                detail: $"{model} is already downloaded; no redownload is required. See Connection diagnostic above for the provider's safe failure reason.",
-                indeterminate: false);
-            SetupStatus.Text = $"{model} is installed locally. {connection} No redownload is required.";
+            HandleLocalTestFailure(model, connection);
             SetLocalSetupBusy(false);
-            await RefreshLocalModelStatusAsync();
-            SetAiState("Test failed", StateKind.Bad, connection);
             return;
         }
 
@@ -305,23 +332,43 @@ public partial class SettingsWindow : Window
         SetStateCard(ModelStateCard, ModelStateText, "✓ Installed", StateKind.Good);
         SetStateCard(ServiceStateCard, ServiceStateText, "✓ Ollama running", StateKind.Good);
         SetAiState("✓ Active", StateKind.Good, connection);
-        ShowSetupProgress(
-            phase: alreadyInstalled ? "Installed model ready to use" : "Model ready to use",
-            percent: 100,
-            detail: $"{connection} SoplyraAI can now use {model} for new captured steps.",
-            indeterminate: false);
-        SetupStatus.Text = $"AI documentation active with {model}. New captures keep screenshots and UI context, then SoplyraAI uses this model to improve step wording. Click Save & continue to make this the selected engine.";
+        ShowSetupProgress(alreadyInstalled ? "Installed model ready to use" : "Model ready to use", 100,
+            $"{connection} SoplyraAI can now use {model} for new captured steps.", false);
+        SetupStatus.Text = $"AI documentation active with {model}. Click Save & continue to use this engine for new captures.";
         SetLocalSetupBusy(false);
     }
+
+    private void HandleLocalTestFailure(string model, string connection)
+    {
+        _selectedLocalModelInstalled = true;
+        SetupButton.Content = "Use installed model";
+        var oom = IsOutOfMemory(connection);
+        var friendly = oom
+            ? $"{model} is installed and Ollama is running, but the model cannot allocate enough memory to start. Close memory-heavy apps or use qwen3:1.7b. For screenshot vision, qwen2.5vl:3b is available but also needs additional memory headroom."
+            : connection;
+        SetAiState(oom ? "Memory limit" : "Test failed", oom ? StateKind.Warning : StateKind.Bad, friendly);
+        ShowSetupProgress("Model installed · inference test failed", 100, friendly, false);
+        SetupStatus.Text = friendly;
+        if (oom)
+        {
+            MemoryRecoveryText.Text = friendly;
+            MemoryRecoveryPanel.Visibility = Visibility.Visible;
+        }
+    }
+
+    private static bool IsOutOfMemory(string text) =>
+        text.Contains("out-of-memory", StringComparison.OrdinalIgnoreCase) ||
+        text.Contains("out of memory", StringComparison.OrdinalIgnoreCase) ||
+        text.Contains("failed to allocate", StringComparison.OrdinalIgnoreCase) ||
+        text.Contains("alloc_tensor_range", StringComparison.OrdinalIgnoreCase) ||
+        text.Contains("allocate cpu buffer", StringComparison.OrdinalIgnoreCase);
 
     private void UpdateSetupProgressFromLog(string model, string line)
     {
         var clean = PrivacySanitizer.Clean(line, 500).Trim();
         if (string.IsNullOrWhiteSpace(clean)) return;
-
         var percent = ParsePercent(clean);
         var phase = $"Downloading {model}";
-
         if (clean.Contains("already installed", StringComparison.OrdinalIgnoreCase))
         {
             phase = "Model already installed";
@@ -329,63 +376,36 @@ public partial class SettingsWindow : Window
             _selectedLocalModelInstalled = true;
             SetStateCard(ModelStateCard, ModelStateText, "✓ Installed", StateKind.Good);
         }
-        else if (clean.Contains("starting ollama", StringComparison.OrdinalIgnoreCase))
-            phase = "Starting Ollama local service";
-        else if (clean.Contains("install", StringComparison.OrdinalIgnoreCase))
-            phase = "Installing Ollama";
-        else if (clean.Contains("manifest", StringComparison.OrdinalIgnoreCase))
-            phase = $"Preparing {model}";
-        else if (clean.Contains("verify", StringComparison.OrdinalIgnoreCase))
-            phase = "Verifying model files";
-        else if (clean.Contains("success", StringComparison.OrdinalIgnoreCase) || clean.Contains("download complete", StringComparison.OrdinalIgnoreCase))
-            phase = "Finalizing local model";
-
-        ShowSetupProgress(
-            phase,
-            percent,
-            CleanProgressDetail(clean),
-            indeterminate: percent is null);
+        else if (clean.Contains("starting ollama", StringComparison.OrdinalIgnoreCase)) phase = "Starting Ollama local service";
+        else if (clean.Contains("install", StringComparison.OrdinalIgnoreCase)) phase = "Installing Ollama";
+        else if (clean.Contains("manifest", StringComparison.OrdinalIgnoreCase)) phase = $"Preparing {model}";
+        else if (clean.Contains("verify", StringComparison.OrdinalIgnoreCase)) phase = "Verifying model files";
+        else if (clean.Contains("success", StringComparison.OrdinalIgnoreCase) || clean.Contains("download complete", StringComparison.OrdinalIgnoreCase)) phase = "Finalizing local model";
+        ShowSetupProgress(phase, percent, CleanProgressDetail(clean), percent is null);
     }
 
     private static int? ParsePercent(string text)
     {
         var match = PercentPattern.Match(text);
-        if (!match.Success || !int.TryParse(match.Groups["percent"].Value, out var value))
-            return null;
-        return Math.Clamp(value, 0, 100);
+        return match.Success && int.TryParse(match.Groups["percent"].Value, out var value) ? Math.Clamp(value, 0, 100) : null;
     }
 
     private static string CleanProgressDetail(string text)
     {
         var cleaned = text.Replace("\r", " ").Replace("\n", " ").Trim();
-        while (cleaned.Contains("  ", StringComparison.Ordinal))
-            cleaned = cleaned.Replace("  ", " ", StringComparison.Ordinal);
+        while (cleaned.Contains("  ", StringComparison.Ordinal)) cleaned = cleaned.Replace("  ", " ", StringComparison.Ordinal);
         return cleaned.Length <= 220 ? cleaned : cleaned[..217] + "…";
     }
 
-    private void ShowSetupProgress(
-        string phase,
-        int? percent,
-        string detail,
-        bool? indeterminate = null)
+    private void ShowSetupProgress(string phase, int? percent, string detail, bool? indeterminate = null)
     {
         SetupProgressPanel.Visibility = Visibility.Visible;
         SetupPhaseText.Text = phase;
         SetupDetailText.Text = detail;
-
         var useIndeterminate = indeterminate ?? percent is null;
         SetupProgressBar.IsIndeterminate = useIndeterminate;
-
-        if (percent.HasValue)
-        {
-            SetupProgressBar.Value = percent.Value;
-            SetupProgressPercent.Text = $"{percent.Value}%";
-        }
-        else
-        {
-            SetupProgressBar.Value = 0;
-            SetupProgressPercent.Text = useIndeterminate ? "Working…" : "";
-        }
+        SetupProgressBar.Value = percent ?? 0;
+        SetupProgressPercent.Text = percent.HasValue ? $"{percent.Value}%" : useIndeterminate ? "Working…" : "";
     }
 
     private void SetLocalSetupBusy(bool busy)
@@ -393,9 +413,9 @@ public partial class SettingsWindow : Window
         SetupButton.IsEnabled = !busy;
         TestConnectionButton.IsEnabled = !busy;
         LocalModelBox.IsEnabled = !busy;
-        SetupButton.Content = busy
-            ? (_selectedLocalModelInstalled ? "Preparing model…" : "Downloading…")
-            : (_selectedLocalModelInstalled ? "Use installed model" : "Download & use model");
+        if (busy) LocalVisionCheck.IsEnabled = false;
+        else UpdateLocalVisionOption();
+        SetupButton.Content = busy ? (_selectedLocalModelInstalled ? "Preparing model…" : "Downloading…") : (_selectedLocalModelInstalled ? "Use installed model" : "Download & use model");
     }
 
     private async void TestButton_Click(object sender, RoutedEventArgs e)
@@ -410,35 +430,28 @@ public partial class SettingsWindow : Window
 
         if (candidate.UseLocalAi)
         {
+            MemoryRecoveryPanel.Visibility = Visibility.Collapsed;
             SetupStatus.Text = "Checking installed local model and Ollama service…";
             var status = await _setup.GetStatusAsync(candidate.AiModel);
             LocalModelStatusText.Text = status.Message;
             _selectedLocalModelInstalled = status.ModelInstalled;
             SetupButton.Content = status.ModelInstalled ? "Use installed model" : "Download & use model";
             UpdateLocalStateCards(status);
-
             if (!status.OllamaInstalled)
             {
                 const string reason = "Ollama is not installed yet. Use Download & use model first.";
-                SetAiState("Cannot test", StateKind.Bad, reason);
-                SetupStatus.Text = reason;
-                return;
+                SetAiState("Cannot test", StateKind.Bad, reason); SetupStatus.Text = reason; return;
             }
             if (!status.ServiceReady)
             {
                 const string reason = "Ollama is installed but its local service is not ready. Use the model button to start/recover Ollama, then test again.";
-                SetAiState("Service offline", StateKind.Warning, reason);
-                SetupStatus.Text = reason;
-                return;
+                SetAiState("Service offline", StateKind.Warning, reason); SetupStatus.Text = reason; return;
             }
             if (!status.ModelInstalled)
             {
                 var reason = $"{candidate.AiModel} is not installed yet. Download it before testing the model.";
-                SetAiState("Model missing", StateKind.Warning, reason);
-                SetupStatus.Text = reason;
-                return;
+                SetAiState("Model missing", StateKind.Warning, reason); SetupStatus.Text = reason; return;
             }
-
             SetAiState("Testing…", StateKind.Neutral, $"Running a real text-generation probe through Ollama with {candidate.AiModel}…");
         }
         else
@@ -448,23 +461,19 @@ public partial class SettingsWindow : Window
 
         SetupStatus.Text = "Testing AI connection and model generation…";
         var connection = await _describer.TestConnectionAsync(candidate);
-        SetupStatus.Text = connection;
         var connected = connection.StartsWith("Connected to ", StringComparison.OrdinalIgnoreCase);
-
         if (candidate.UseLocalAi)
         {
             if (connected)
             {
                 SetAiState("✓ Active", StateKind.Good, connection);
-                SetupStatus.Text = $"{connection} AI documentation is active. When you start capture, every recorded step keeps its screenshot and UI context, then {candidate.AiModel} is asked to improve the documentation wording. Weak AI output is automatically replaced by SoplyraAI's grounded fallback.";
+                SetupStatus.Text = $"{connection} AI documentation is active for new captures.";
             }
-            else
-            {
-                SetAiState("Test failed", StateKind.Bad, connection);
-            }
+            else HandleLocalTestFailure(candidate.AiModel, connection);
         }
         else
         {
+            SetupStatus.Text = connection;
             ShowCloudDiagnostic(connection, connected ? StateKind.Good : StateKind.Bad);
         }
     }
@@ -481,42 +490,29 @@ public partial class SettingsWindow : Window
     {
         var noAi = NoAiRadio.IsChecked == true;
         var local = !noAi && LocalRadio.IsChecked == true;
-
         if (noAi)
         {
             return new AppSettings
             {
-                EnableAi = false,
-                UseLocalAi = false,
-                AllowRemoteAi = false,
-                SendScreenshotsToAi = false,
-                HasCompletedAiSetup = true,
-                AiProvider = _settings.AiProvider,
-                AiEndpoint = _settings.AiEndpoint,
-                AiModel = _settings.AiModel,
-                AiApiKey = _settings.AiApiKey,
-                DocumentationMode = _settings.DocumentationMode,
+                EnableAi = false, UseLocalAi = false, AllowRemoteAi = false, SendScreenshotsToAi = false,
+                HasCompletedAiSetup = true, AiProvider = _settings.AiProvider, AiEndpoint = _settings.AiEndpoint,
+                AiModel = _settings.AiModel, AiApiKey = _settings.AiApiKey, DocumentationMode = _settings.DocumentationMode,
                 DefaultExportFormat = (ExportFormatBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "PDF",
                 ScreenshotMode = (ScreenshotModeBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "ActiveWindow",
                 CaptureDelayMs = int.TryParse(DelayBox.Text, out var noAiMs) ? Math.Clamp(noAiMs, 0, 1000) : 180
             };
         }
 
-        var provider = local
-            ? AiProviderCatalog.Get("Ollama")
-            : AiProviderCatalog.Cloud[Math.Clamp(ProviderBox.SelectedIndex, 0, AiProviderCatalog.Cloud.Count - 1)];
-        var model = local
-            ? LocalModelBox.SelectedItem?.ToString() ?? provider.DefaultModel
-            : PrivacySanitizer.Clean(ModelBox.Text, 120);
+        var provider = local ? AiProviderCatalog.Get("Ollama") : AiProviderCatalog.Cloud[Math.Clamp(ProviderBox.SelectedIndex, 0, AiProviderCatalog.Cloud.Count - 1)];
+        var model = local ? LocalModelBox.SelectedItem?.ToString() ?? provider.DefaultModel : PrivacySanitizer.Clean(ModelBox.Text, 120);
+        var visionRequested = local ? LocalVisionCheck.IsChecked == true : VisionCheck.IsChecked == true;
 
         return new AppSettings
         {
             EnableAi = true,
             UseLocalAi = local,
             AllowRemoteAi = !local,
-            SendScreenshotsToAi = local
-                ? AiProviderCatalog.IsVisionModel(provider.Id, model)
-                : VisionCheck.IsChecked == true && AiProviderCatalog.IsVisionModel(provider.Id, model),
+            SendScreenshotsToAi = visionRequested && AiProviderCatalog.IsVisionModel(provider.Id, model),
             HasCompletedAiSetup = true,
             AiProvider = provider.Id,
             AiEndpoint = provider.Endpoint,
@@ -532,26 +528,21 @@ public partial class SettingsWindow : Window
     private static bool ValidateCandidate(AppSettings candidate)
     {
         if (!candidate.EnableAi) return true;
-
         if (!AiEndpointPolicy.TryValidate(candidate.AiEndpoint, candidate.AllowRemoteAi, out _, out var endpointError))
         {
-            MessageBox.Show(endpointError, "SoplyraAI security", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return false;
+            MessageBox.Show(endpointError, "SoplyraAI security", MessageBoxButton.OK, MessageBoxImage.Warning); return false;
         }
         if (string.IsNullOrWhiteSpace(candidate.AiModel))
         {
-            MessageBox.Show("Choose or enter a model name.", "SoplyraAI", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return false;
+            MessageBox.Show("Choose or enter a model name.", "SoplyraAI", MessageBoxButton.OK, MessageBoxImage.Warning); return false;
         }
         if (!candidate.UseLocalAi && string.IsNullOrWhiteSpace(candidate.AiApiKey))
         {
-            MessageBox.Show("Enter the API key for the selected cloud provider.", "SoplyraAI", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return false;
+            MessageBox.Show("Enter the API key for the selected cloud provider.", "SoplyraAI", MessageBoxButton.OK, MessageBoxImage.Warning); return false;
         }
         if (candidate.AiApiKey.Length > 8192)
         {
-            MessageBox.Show("The API key is too long.", "SoplyraAI security", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return false;
+            MessageBox.Show("The API key is too long.", "SoplyraAI security", MessageBoxButton.OK, MessageBoxImage.Warning); return false;
         }
         return true;
     }
@@ -578,11 +569,5 @@ public partial class SettingsWindow : Window
         DialogResult = false;
     }
 
-    private enum StateKind
-    {
-        Neutral,
-        Good,
-        Warning,
-        Bad
-    }
+    private enum StateKind { Neutral, Good, Warning, Bad }
 }
