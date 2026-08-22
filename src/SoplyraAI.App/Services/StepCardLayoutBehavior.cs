@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
+using System.Windows.Input;
 using System.Windows.Media;
 using SoplyraAI.Models;
 
@@ -22,6 +23,11 @@ internal static class StepCardLayoutBehavior
             typeof(TextBox),
             TextBoxBase.TextChangedEvent,
             new TextChangedEventHandler(OnTextBoxTextChanged));
+
+        EventManager.RegisterClassHandler(
+            typeof(TextBox),
+            UIElement.LostKeyboardFocusEvent,
+            new KeyboardFocusChangedEventHandler(OnTextBoxLostKeyboardFocus));
 
         EventManager.RegisterClassHandler(
             typeof(Image),
@@ -72,6 +78,17 @@ internal static class StepCardLayoutBehavior
             step.ApplyUserTitle(textBox.Text);
         else if (string.Equals(path, nameof(GuideStep.Description), StringComparison.Ordinal))
             step.ApplyUserDescription(textBox.Text);
+    }
+
+    private static void OnTextBoxLostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (sender is not TextBox textBox || textBox.DataContext is not GuideStep step) return;
+        if (!step.TitleEditedByUser && !step.DescriptionEditedByUser) return;
+
+        // Commit the edit when the user leaves the field (including clicking Remove). This avoids
+        // saving on every keystroke while still making double-click/edit interactions durable.
+        if (Window.GetWindow(textBox) is global::SoplyraAI.MainWindow mainWindow)
+            mainWindow.CommitInlineEdit(step);
     }
 
     private static void OnImageLoaded(object sender, RoutedEventArgs e)
