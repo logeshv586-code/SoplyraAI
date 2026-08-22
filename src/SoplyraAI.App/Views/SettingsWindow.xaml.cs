@@ -67,7 +67,7 @@ public partial class SettingsWindow : Window
         BuiltInPanel.Visibility = noAi ? Visibility.Visible : Visibility.Collapsed;
         if (!local) SetupProgressPanel.Visibility = Visibility.Collapsed;
         if (local && IsLoaded) _ = RefreshLocalModelStatusAsync();
-        if (cloud) RefreshCloudProvider();
+        if (cloud) RefreshCloudProvider(resetModel: false);
     }
 
     private async void LocalModelBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -134,24 +134,51 @@ public partial class SettingsWindow : Window
             status.ServiceReady ? StateKind.Good : StateKind.Warning);
     }
 
-    private void SetAiState(string text, StateKind kind) =>
+    private void SetAiState(string text, StateKind kind, string? detail = null)
+    {
         SetStateCard(AiStateCard, AiStateText, text, kind);
+        if (string.IsNullOrWhiteSpace(detail))
+        {
+            AiDiagnosticPanel.Visibility = Visibility.Collapsed;
+            AiDiagnosticText.Text = "";
+            return;
+        }
+
+        AiDiagnosticPanel.Visibility = Visibility.Visible;
+        AiDiagnosticText.Text = PrivacySanitizer.Clean(detail, 700);
+        var palette = GetStatePalette(kind);
+        AiDiagnosticPanel.Background = new SolidColorBrush(palette.Background);
+        AiDiagnosticPanel.BorderBrush = new SolidColorBrush(palette.Border);
+        AiDiagnosticText.Foreground = new SolidColorBrush(palette.Foreground);
+    }
+
+    private void ShowCloudDiagnostic(string text, StateKind kind)
+    {
+        CloudDiagnosticPanel.Visibility = Visibility.Visible;
+        CloudDiagnosticText.Text = PrivacySanitizer.Clean(text, 700);
+        var palette = GetStatePalette(kind);
+        CloudDiagnosticPanel.Background = new SolidColorBrush(palette.Background);
+        CloudDiagnosticPanel.BorderBrush = new SolidColorBrush(palette.Border);
+        CloudDiagnosticText.Foreground = new SolidColorBrush(palette.Foreground);
+    }
 
     private static void SetStateCard(Border card, TextBlock textBlock, string text, StateKind kind)
     {
-        var (background, border, foreground) = kind switch
+        var palette = GetStatePalette(kind);
+        card.Background = new SolidColorBrush(palette.Background);
+        card.BorderBrush = new SolidColorBrush(palette.Border);
+        textBlock.Foreground = new SolidColorBrush(palette.Foreground);
+        textBlock.Text = text;
+    }
+
+    private static (Color Background, Color Border, Color Foreground) GetStatePalette(StateKind kind) =>
+        kind switch
         {
             StateKind.Good => (Color.FromRgb(236, 253, 245), Color.FromRgb(167, 243, 208), Color.FromRgb(4, 120, 87)),
             StateKind.Warning => (Color.FromRgb(255, 251, 235), Color.FromRgb(253, 230, 138), Color.FromRgb(180, 83, 9)),
             StateKind.Bad => (Color.FromRgb(254, 242, 242), Color.FromRgb(254, 202, 202), Color.FromRgb(185, 28, 28)),
             _ => (Color.FromRgb(248, 250, 252), Color.FromRgb(226, 232, 240), Color.FromRgb(71, 85, 105))
         };
-
-        card.Background = new SolidColorBrush(background);
-        card.BorderBrush = new SolidColorBrush(border);
-        textBlock.Foreground = new SolidColorBrush(foreground);
-        textBlock.Text = text;
-    }
 
     private static string BuildAdvancedModelHint(string selectedModel, IReadOnlyList<string> installedModels)
     {
@@ -183,20 +210,22 @@ public partial class SettingsWindow : Window
 
     private void ProviderBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (IsLoaded) RefreshCloudProvider();
+        if (IsLoaded) RefreshCloudProvider(resetModel: true);
     }
 
-    private void RefreshCloudProvider()
+    private void RefreshCloudProvider(bool resetModel)
     {
         var options = AiProviderCatalog.Cloud;
         var index = Math.Clamp(ProviderBox.SelectedIndex, 0, options.Count - 1);
         var provider = options[index];
         ModelBox.ItemsSource = provider.Models;
-        if (string.IsNullOrWhiteSpace(ModelBox.Text) || !provider.Models.Contains(ModelBox.Text))
+        if (resetModel || string.IsNullOrWhiteSpace(ModelBox.Text))
             ModelBox.Text = provider.DefaultModel;
         ProviderNote.Text = provider.Note;
         VisionCheck.IsEnabled = provider.SupportsVision;
         if (!provider.SupportsVision) VisionCheck.IsChecked = false;
+        CloudDiagnosticPanel.Visibility = Visibility.Collapsed;
+        CloudDiagnosticText.Text = "";
     }
 
     private async void SetupButton_Click(object sender, RoutedEventArgs e)
@@ -204,7 +233,7 @@ public partial class SettingsWindow : Window
         var model = LocalModelBox.SelectedItem?.ToString() ?? AiProviderCatalog.Get("Ollama").DefaultModel;
         var wasInstalled = _selectedLocalModelInstalled;
         SetLocalSetupBusy(true);
-        SetAiState("Preparing…", StateKind.Neutral);
+        SetAiState("Preparing…", StateKind.Neutral, $"Preparing {model} for a real inference test.");
         ShowSetupProgress(
             phase: wasInstalled ? $"Preparing installed model · {model}" : $"Preparing {model}",
             percent: wasInstalled ? 100 : null,
@@ -219,7 +248,7 @@ public partial class SettingsWindow : Window
 
         if (!result.StartsWith("Local AI is ready:", StringComparison.OrdinalIgnoreCase))
         {
-            SetAiState("Not active", StateKind.Bad);
+            SetAiState("Not active", StateKind.Bad, result);
             ShowSetupProgress(
                 phase: "Local model could not be prepared",
                 percent: null,
@@ -259,23 +288,23 @@ public partial class SettingsWindow : Window
         {
             _selectedLocalModelInstalled = true;
             SetupButton.Content = "Use installed model";
-            SetAiState("Connection retry", StateKind.Warning);
+            SetAiState("Test failed", StateKind.Bad, connection);
             ShowSetupProgress(
-                phase: "Model installed · connection needs retry",
+                phase: "Model installed · inference test failed",
                 percent: 100,
-                detail: $"{model} is already downloaded, so do not download it again. Ollama did not answer the model test yet. Use ‘Test connection’ again after a few seconds or reopen SoplyraAI.",
+                detail: $"{model} is already downloaded; no redownload is required. See Connection diagnostic above for the provider's safe failure reason.",
                 indeterminate: false);
             SetupStatus.Text = $"{model} is installed locally. {connection} No redownload is required.";
             SetLocalSetupBusy(false);
             await RefreshLocalModelStatusAsync();
-            SetAiState("Connection retry", StateKind.Warning);
+            SetAiState("Test failed", StateKind.Bad, connection);
             return;
         }
 
         _selectedLocalModelInstalled = true;
         SetStateCard(ModelStateCard, ModelStateText, "✓ Installed", StateKind.Good);
         SetStateCard(ServiceStateCard, ServiceStateText, "✓ Ollama running", StateKind.Good);
-        SetAiState("✓ Active", StateKind.Good);
+        SetAiState("✓ Active", StateKind.Good, connection);
         ShowSetupProgress(
             phase: alreadyInstalled ? "Installed model ready to use" : "Model ready to use",
             percent: 100,
@@ -390,40 +419,53 @@ public partial class SettingsWindow : Window
 
             if (!status.OllamaInstalled)
             {
-                SetAiState("Cannot test", StateKind.Bad);
-                SetupStatus.Text = "Ollama is not installed yet. Use Download & use model first.";
+                const string reason = "Ollama is not installed yet. Use Download & use model first.";
+                SetAiState("Cannot test", StateKind.Bad, reason);
+                SetupStatus.Text = reason;
                 return;
             }
             if (!status.ServiceReady)
             {
-                SetAiState("Service offline", StateKind.Warning);
-                SetupStatus.Text = "Ollama is installed but its local service is not ready. Reopen SoplyraAI or use the model button to retry startup.";
+                const string reason = "Ollama is installed but its local service is not ready. Use the model button to start/recover Ollama, then test again.";
+                SetAiState("Service offline", StateKind.Warning, reason);
+                SetupStatus.Text = reason;
                 return;
             }
             if (!status.ModelInstalled)
             {
-                SetAiState("Model missing", StateKind.Warning);
-                SetupStatus.Text = $"{candidate.AiModel} is not installed yet. Download it before testing the model.";
+                var reason = $"{candidate.AiModel} is not installed yet. Download it before testing the model.";
+                SetAiState("Model missing", StateKind.Warning, reason);
+                SetupStatus.Text = reason;
                 return;
             }
+
+            SetAiState("Testing…", StateKind.Neutral, $"Running a real text-generation probe through Ollama with {candidate.AiModel}…");
+        }
+        else
+        {
+            ShowCloudDiagnostic($"Testing {AiProviderCatalog.Get(candidate.AiProvider).DisplayName} · {candidate.AiModel}…", StateKind.Neutral);
         }
 
-        SetAiState("Testing…", StateKind.Neutral);
         SetupStatus.Text = "Testing AI connection and model generation…";
         var connection = await _describer.TestConnectionAsync(candidate);
         SetupStatus.Text = connection;
+        var connected = connection.StartsWith("Connected to ", StringComparison.OrdinalIgnoreCase);
 
-        if (connection.StartsWith("Connected to ", StringComparison.OrdinalIgnoreCase))
+        if (candidate.UseLocalAi)
         {
-            SetAiState("✓ Active", StateKind.Good);
-            if (candidate.UseLocalAi)
+            if (connected)
             {
+                SetAiState("✓ Active", StateKind.Good, connection);
                 SetupStatus.Text = $"{connection} AI documentation is active. When you start capture, every recorded step keeps its screenshot and UI context, then {candidate.AiModel} is asked to improve the documentation wording. Weak AI output is automatically replaced by SoplyraAI's grounded fallback.";
+            }
+            else
+            {
+                SetAiState("Test failed", StateKind.Bad, connection);
             }
         }
         else
         {
-            SetAiState("Test failed", StateKind.Bad);
+            ShowCloudDiagnostic(connection, connected ? StateKind.Good : StateKind.Bad);
         }
     }
 
