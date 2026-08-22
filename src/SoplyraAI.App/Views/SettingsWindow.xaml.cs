@@ -16,6 +16,8 @@ public partial class SettingsWindow : Window
     private readonly LocalAiSetupService _setup;
     private readonly DescriptionService _describer = new();
     private readonly bool _firstRun;
+    private bool _selectedLocalModelInstalled;
+    private int _localStatusRequest;
 
     public SettingsWindow(AppSettings settings, LocalAiSetupService setup, bool firstRun = false)
     {
@@ -41,6 +43,12 @@ public partial class SettingsWindow : Window
         ScreenshotModeBox.SelectedIndex = settings.ScreenshotMode.Equals("FullDesktop", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
         ExportFormatBox.SelectedIndex = settings.DefaultExportFormat switch { "Word" => 1, "HTML" => 2, "All" => 3, _ => 0 };
         ApplyEngineMode();
+
+        Loaded += async (_, _) =>
+        {
+            if (LocalRadio.IsChecked == true)
+                await RefreshLocalModelStatusAsync();
+        };
     }
 
     private void EngineMode_Changed(object sender, RoutedEventArgs e)
@@ -57,7 +65,76 @@ public partial class SettingsWindow : Window
         CloudPanel.Visibility = cloud ? Visibility.Visible : Visibility.Collapsed;
         BuiltInPanel.Visibility = noAi ? Visibility.Visible : Visibility.Collapsed;
         if (!local) SetupProgressPanel.Visibility = Visibility.Collapsed;
+        if (local && IsLoaded) _ = RefreshLocalModelStatusAsync();
         if (cloud) RefreshCloudProvider();
+    }
+
+    private async void LocalModelBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (IsLoaded && LocalRadio.IsChecked == true)
+            await RefreshLocalModelStatusAsync();
+    }
+
+    private async Task RefreshLocalModelStatusAsync()
+    {
+        if (!IsLoaded || LocalRadio.IsChecked != true) return;
+
+        var request = ++_localStatusRequest;
+        var model = LocalModelBox.SelectedItem?.ToString() ?? AiProviderCatalog.Get("Ollama").DefaultModel;
+        _selectedLocalModelInstalled = false;
+        SetupButton.Content = "Download & use model";
+        LocalModelStatusText.Text = $"Checking whether {model} is already installed…";
+        AdvancedModelHintPanel.Visibility = Visibility.Collapsed;
+
+        LocalModelStatus status;
+        try
+        {
+            status = await _setup.GetStatusAsync(model);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (request != _localStatusRequest || LocalRadio.IsChecked != true) return;
+
+        LocalModelStatusText.Text = status.Message;
+        _selectedLocalModelInstalled = status.ModelInstalled;
+        SetupButton.Content = status.ModelInstalled ? "Use installed model" : "Download & use model";
+
+        if (status.ModelInstalled)
+        {
+            AdvancedModelHintText.Text = BuildAdvancedModelHint(model, status.InstalledModels);
+            AdvancedModelHintPanel.Visibility = Visibility.Visible;
+        }
+    }
+
+    private static string BuildAdvancedModelHint(string selectedModel, IReadOnlyList<string> installedModels)
+    {
+        string[] preference = selectedModel.ToLowerInvariant() switch
+        {
+            "qwen3:4b" => new[] { "qwen2.5vl:3b", "gemma3:4b", "deepseek-r1:7b" },
+            "qwen2.5vl:3b" => new[] { "gemma3:4b", "deepseek-r1:7b", "qwen3:4b" },
+            "deepseek-r1:7b" => new[] { "qwen2.5vl:3b", "gemma3:4b", "qwen3:4b" },
+            "gemma3:4b" => new[] { "qwen2.5vl:3b", "deepseek-r1:7b", "qwen3:4b" },
+            _ => AiProviderCatalog.LocalModels.Where(x => !x.Equals(selectedModel, StringComparison.OrdinalIgnoreCase)).ToArray()
+        };
+
+        var next = preference.FirstOrDefault(candidate =>
+            !installedModels.Any(item => item.Equals(candidate, StringComparison.OrdinalIgnoreCase)));
+
+        if (next is null)
+            return "All recommended SoplyraAI local models are already installed. You can switch between them without downloading again.";
+
+        var benefit = next.ToLowerInvariant() switch
+        {
+            "qwen2.5vl:3b" => "adds screenshot vision for stronger understanding of what is visible on screen",
+            "gemma3:4b" => "adds another multimodal option for richer screenshot-aware documentation",
+            "deepseek-r1:7b" => "adds deeper reasoning for more complex workflow descriptions",
+            _ => "adds another local documentation option"
+        };
+
+        return $"Advanced option: {next} {benefit}. Select it above and download it when you want more capability; {selectedModel} will remain installed.";
     }
 
     private void ProviderBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -81,11 +158,15 @@ public partial class SettingsWindow : Window
     private async void SetupButton_Click(object sender, RoutedEventArgs e)
     {
         var model = LocalModelBox.SelectedItem?.ToString() ?? AiProviderCatalog.Get("Ollama").DefaultModel;
+        var wasInstalled = _selectedLocalModelInstalled;
         SetLocalSetupBusy(true);
         ShowSetupProgress(
-            phase: $"Preparing {model}",
-            percent: null,
-            detail: "Checking Ollama and local model requirements…");
+            phase: wasInstalled ? $"Preparing installed model · {model}" : $"Preparing {model}",
+            percent: wasInstalled ? 100 : null,
+            detail: wasInstalled
+                ? "This model already exists on this PC. SoplyraAI is starting Ollama and preparing it for use — no redownload is required."
+                : "Checking Ollama and local model requirements…",
+            indeterminate: !wasInstalled);
 
         var result = await _setup.SetupAsync(
             model,
@@ -94,49 +175,65 @@ public partial class SettingsWindow : Window
         if (!result.StartsWith("Local AI is ready:", StringComparison.OrdinalIgnoreCase))
         {
             ShowSetupProgress(
-                phase: "Download could not be completed",
+                phase: "Local model could not be prepared",
                 percent: null,
                 detail: result,
                 indeterminate: false);
             SetupStatus.Text = result;
             SetLocalSetupBusy(false);
+            await RefreshLocalModelStatusAsync();
             return;
         }
 
+        var alreadyInstalled = result.Contains("already installed", StringComparison.OrdinalIgnoreCase) || wasInstalled;
         var candidate = BuildCandidate();
         ShowSetupProgress(
-            phase: "Verifying downloaded model",
-            percent: null,
-            detail: $"{model} is downloaded. SoplyraAI is checking the local AI connection…");
+            phase: alreadyInstalled ? "Using installed model" : "Verifying downloaded model",
+            percent: 100,
+            detail: alreadyInstalled
+                ? $"{model} is already stored locally. SoplyraAI is checking that the model can answer requests."
+                : $"{model} is downloaded. SoplyraAI is checking the local AI connection…",
+            indeterminate: false);
 
         var connection = await _describer.TestConnectionAsync(candidate);
         if (!connection.StartsWith("Connected to ", StringComparison.OrdinalIgnoreCase))
         {
-            await Task.Delay(1200);
+            ShowSetupProgress(
+                phase: "Starting local AI service",
+                percent: 100,
+                detail: "The model files are present. SoplyraAI is restarting/checking Ollama and allowing the model extra time to warm up.",
+                indeterminate: false);
+
+            _ = await _setup.GetStatusAsync(model);
+            await Task.Delay(1800);
             connection = await _describer.TestConnectionAsync(candidate);
         }
 
         if (!connection.StartsWith("Connected to ", StringComparison.OrdinalIgnoreCase))
         {
+            _selectedLocalModelInstalled = true;
+            SetupButton.Content = "Use installed model";
             ShowSetupProgress(
-                phase: "Model downloaded · verification pending",
+                phase: "Model installed · connection needs retry",
                 percent: 100,
-                detail: $"{connection} Restart Ollama or use Test connection, then retry.",
+                detail: $"{model} is already downloaded, so do not download it again. Ollama did not answer the model test yet. Use ‘Test connection’ again after a few seconds or reopen SoplyraAI.",
                 indeterminate: false);
-            SetupStatus.Text = $"{result}\n{connection}\nThe model is downloaded, but SoplyraAI could not verify it yet.";
+            SetupStatus.Text = $"{model} is installed locally. {connection} No redownload is required.";
             SetLocalSetupBusy(false);
+            await RefreshLocalModelStatusAsync();
             return;
         }
 
         ApplyCandidate(candidate);
+        _selectedLocalModelInstalled = true;
         ShowSetupProgress(
-            phase: "Model ready to use",
+            phase: alreadyInstalled ? "Installed model ready to use" : "Model ready to use",
             percent: 100,
-            detail: $"{connection} SoplyraAI will use this model for new captured steps.",
+            detail: $"{connection} SoplyraAI will use {model} for new captured steps.",
             indeterminate: false);
-        SetupStatus.Text = $"{connection} The downloaded model is active for new captures.";
+        SetupStatus.Text = $"{connection} The local model is active for new captures.";
 
-        await Task.Delay(700);
+        await Task.Delay(900);
         SetLocalSetupBusy(false);
         DialogResult = true;
     }
@@ -149,13 +246,21 @@ public partial class SettingsWindow : Window
         var percent = ParsePercent(clean);
         var phase = $"Downloading {model}";
 
-        if (clean.Contains("install", StringComparison.OrdinalIgnoreCase))
+        if (clean.Contains("already installed", StringComparison.OrdinalIgnoreCase))
+        {
+            phase = "Model already installed";
+            percent = 100;
+            _selectedLocalModelInstalled = true;
+        }
+        else if (clean.Contains("starting ollama", StringComparison.OrdinalIgnoreCase))
+            phase = "Starting Ollama local service";
+        else if (clean.Contains("install", StringComparison.OrdinalIgnoreCase))
             phase = "Installing Ollama";
         else if (clean.Contains("manifest", StringComparison.OrdinalIgnoreCase))
             phase = $"Preparing {model}";
         else if (clean.Contains("verify", StringComparison.OrdinalIgnoreCase))
             phase = "Verifying model files";
-        else if (clean.Contains("success", StringComparison.OrdinalIgnoreCase))
+        else if (clean.Contains("success", StringComparison.OrdinalIgnoreCase) || clean.Contains("download complete", StringComparison.OrdinalIgnoreCase))
             phase = "Finalizing local model";
 
         ShowSetupProgress(
@@ -211,7 +316,9 @@ public partial class SettingsWindow : Window
         SetupButton.IsEnabled = !busy;
         TestConnectionButton.IsEnabled = !busy;
         LocalModelBox.IsEnabled = !busy;
-        SetupButton.Content = busy ? "Downloading…" : "Download & use model";
+        SetupButton.Content = busy
+            ? (_selectedLocalModelInstalled ? "Preparing model…" : "Downloading…")
+            : (_selectedLocalModelInstalled ? "Use installed model" : "Download & use model");
     }
 
     private async void TestButton_Click(object sender, RoutedEventArgs e)
@@ -223,6 +330,32 @@ public partial class SettingsWindow : Window
             return;
         }
         if (!ValidateCandidate(candidate)) return;
+
+        if (candidate.UseLocalAi)
+        {
+            SetupStatus.Text = "Checking installed local model and Ollama service…";
+            var status = await _setup.GetStatusAsync(candidate.AiModel);
+            LocalModelStatusText.Text = status.Message;
+            _selectedLocalModelInstalled = status.ModelInstalled;
+            SetupButton.Content = status.ModelInstalled ? "Use installed model" : "Download & use model";
+
+            if (!status.OllamaInstalled)
+            {
+                SetupStatus.Text = "Ollama is not installed yet. Use Download & use model first.";
+                return;
+            }
+            if (!status.ServiceReady)
+            {
+                SetupStatus.Text = "Ollama is installed but its local service is not ready. Reopen SoplyraAI or use the model button to retry startup.";
+                return;
+            }
+            if (!status.ModelInstalled)
+            {
+                SetupStatus.Text = $"{candidate.AiModel} is not installed yet. Download it before testing the model.";
+                return;
+            }
+        }
+
         SetupStatus.Text = "Testing AI connection…";
         SetupStatus.Text = await _describer.TestConnectionAsync(candidate);
     }
