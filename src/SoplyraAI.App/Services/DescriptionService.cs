@@ -71,10 +71,8 @@ public sealed class DescriptionService
         }
         catch (OperationCanceledException)
         {
-            return "Test cancelled.";
-        }
-        catch (TaskCanceledException)
-        {
+            if (ct.IsCancellationRequested)
+                return "Test cancelled.";
             return settings.UseLocalAi
                 ? "Test failed · Ollama/model warm-up timed out. The model is installed; retry once after it finishes loading into RAM/VRAM."
                 : "Test failed · Provider request timed out.";
@@ -239,8 +237,8 @@ Current grounded draft: {PrivacySanitizer.Clean(step.Description, 1200)}
             return chat;
 
         // Older Ollama builds may reject the `think` field or may spend the response budget on
-        // reasoning. /api/generate plus Qwen's /no_think prompt gives those installs a second,
-        // documented local inference path without downloading the model again.
+        // reasoning. /api/generate plus Qwen's /no_think prompt gives those installs a second
+        // local inference path without downloading the model again.
         var fallbackPrompt = IsOllamaThinkingModel(model)
             ? "/no_think\n" + userPrompt
             : userPrompt;
@@ -273,7 +271,6 @@ Current grounded draft: {PrivacySanitizer.Clean(step.Description, 1200)}
 
     private static bool IsOllamaThinkingModel(string model) =>
         model.StartsWith("qwen3", StringComparison.OrdinalIgnoreCase) ||
-        model.Contains("deepseek-r1", StringComparison.OrdinalIgnoreCase) ||
         model.Contains("deepseek-r1", StringComparison.OrdinalIgnoreCase);
 
     private static async Task<ProviderCallResult> SendOllamaChatPayloadAsync(
